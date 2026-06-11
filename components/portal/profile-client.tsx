@@ -15,21 +15,29 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
+import { AccountSettings } from "@/components/account-settings";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
 import { formatDate } from "@/lib/format";
-import type { ChecklistItem, Client, ClientDocument } from "@/lib/types";
+import type {
+  ChecklistItem,
+  Client,
+  ClientDocument,
+  UserProfile,
+} from "@/lib/types";
 
-const VALID_TABS = ["company", "checklist", "documents", "branding"];
+const VALID_TABS = ["company", "account", "checklist", "documents", "branding"];
 
 export function PortalProfile({
   userId,
+  profile,
   client,
   initialChecklist,
   documents,
   initialTab,
 }: {
   userId: string;
+  profile: UserProfile;
   client: Client;
   initialChecklist: ChecklistItem[];
   documents: ClientDocument[];
@@ -141,12 +149,17 @@ export function PortalProfile({
       </header>
 
       <Tabs defaultValue={tab} className="flex-1">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="company">Company Info</TabsTrigger>
+          <TabsTrigger value="account">My Account</TabsTrigger>
           <TabsTrigger value="checklist">Checklist</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="account" className="mt-4">
+          <AccountSettings profile={profile} />
+        </TabsContent>
 
         <TabsContent value="company" className="mt-4">
           <Card className="max-w-xl">

@@ -18,12 +18,14 @@ import { isTeamRole, type UserRole } from "@/lib/types";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
@@ -47,6 +49,26 @@ export default function LoginPage() {
     const role = (profile?.role ?? "client") as UserRole;
     router.replace(isTeamRole(role) ? "/dashboard" : "/portal");
     router.refresh();
+  }
+
+  async function handleForgot(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setNotice(null);
+    setLoading(true);
+
+    const supabase = createClient();
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      email,
+      { redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password` }
+    );
+
+    if (resetError) {
+      setError(resetError.message);
+    } else {
+      setNotice("Check your email for a reset link.");
+    }
+    setLoading(false);
   }
 
   return (
@@ -80,7 +102,7 @@ export default function LoginPage() {
         />
       </div>
 
-      {/* Right — login form */}
+      {/* Right — login / forgot password */}
       <div className="flex flex-1 items-center justify-center bg-background p-6">
         <div className="w-full max-w-sm space-y-6">
           <div className="space-y-1 text-center lg:hidden">
@@ -92,52 +114,118 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Welcome back</CardTitle>
-              <CardDescription>
-                Sign in with your Dispatch account.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@bluejaypro.com"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    required
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </div>
+          {mode === "login" ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Welcome back</CardTitle>
+                <CardDescription>
+                  Sign in with your Dispatch account.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@bluejaypro.com"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="password">Password</Label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode("forgot");
+                          setError(null);
+                          setNotice(null);
+                        }}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                    <Input
+                      id="password"
+                      type="password"
+                      required
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                    />
+                  </div>
 
-                {error && (
-                  <p className="text-sm text-destructive" role="alert">
-                    {error}
-                  </p>
-                )}
+                  {error && (
+                    <p className="text-sm text-destructive" role="alert">
+                      {error}
+                    </p>
+                  )}
 
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Signing in…" : "Sign in"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+                  <Button type="submit" className="w-full" disabled={loading}>
+                    {loading ? "Signing in…" : "Sign in"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>Reset your password</CardTitle>
+                <CardDescription>
+                  We&apos;ll email you a link to set a new one.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleForgot} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="forgot-email">Email</Label>
+                    <Input
+                      id="forgot-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="you@bluejaypro.com"
+                    />
+                  </div>
+
+                  {error && (
+                    <p className="text-sm text-destructive" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  {notice && (
+                    <p className="text-sm text-emerald-400" role="status">
+                      {notice}
+                    </p>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={loading}>
+                    {loading ? "Sending…" : "Send reset link"}
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("login");
+                      setError(null);
+                      setNotice(null);
+                    }}
+                    className="w-full text-center text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    Back to sign in
+                  </button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
 
           <p className="text-center text-xs text-muted-foreground">
             Access is provisioned by your Bluejaypro account manager.

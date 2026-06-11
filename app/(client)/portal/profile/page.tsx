@@ -43,6 +43,7 @@ export default async function PortalProfilePage({
   return (
     <PortalProfile
       userId={profile.id}
+      profile={profile}
       client={client}
       initialChecklist={(checklist.data ?? []) as ChecklistItem[]}
       documents={(documents.data ?? []) as ClientDocument[]}

@@ -35,6 +35,7 @@ export default async function DashboardLayout({
       <Sidebar
         items={NAV_ITEMS}
         sectionLabel="Team workspace"
+        profileHref="/dashboard/settings/profile"
         user={{
           name: profile?.full_name ?? "Team member",
           email: profile?.email ?? "",

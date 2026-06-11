@@ -22,6 +22,7 @@ export default async function PortalLayout({
       <Sidebar
         items={NAV_ITEMS}
         sectionLabel="Client portal"
+        profileHref="/portal/profile?tab=account"
         user={{
           name: profile?.full_name ?? "Client",
           email: profile?.email ?? "",

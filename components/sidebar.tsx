@@ -115,24 +115,43 @@ function Brand() {
   );
 }
 
-function UserFooter({ user, onSignOut }: { user: SidebarUser; onSignOut: () => void }) {
+function UserFooter({
+  user,
+  profileHref,
+  onSignOut,
+  onNavigate,
+}: {
+  user: SidebarUser;
+  profileHref: string;
+  onSignOut: () => void;
+  onNavigate?: () => void;
+}) {
   return (
     <div className="border-t border-sidebar-border p-3">
-      <div className="flex items-center gap-3 rounded-md px-2 py-2">
-        <UserAvatar name={user.name} avatarUrl={user.avatarUrl} className="size-8" />
-        <div className="min-w-0 flex-1 leading-tight">
-          <p className="truncate text-sm font-medium">{user.name}</p>
-          {user.roleLabel ? (
-            <Badge
-              variant="outline"
-              className="mt-0.5 h-4 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary"
-            >
-              {user.roleLabel}
-            </Badge>
-          ) : (
-            <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-          )}
-        </div>
+      <div className="flex items-center gap-1 rounded-md px-1 py-1">
+        <Link
+          href={profileHref}
+          onClick={onNavigate}
+          title="Profile settings"
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1 transition-colors hover:bg-sidebar-accent/60"
+        >
+          <UserAvatar name={user.name} avatarUrl={user.avatarUrl} className="size-8" />
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-sm font-medium">{user.name}</span>
+            {user.roleLabel ? (
+              <Badge
+                variant="outline"
+                className="mt-0.5 h-4 border-primary/30 bg-primary/10 px-1.5 text-[10px] text-primary"
+              >
+                {user.roleLabel}
+              </Badge>
+            ) : (
+              <span className="block truncate text-xs text-muted-foreground">
+                {user.email}
+              </span>
+            )}
+          </span>
+        </Link>
         <button
           onClick={onSignOut}
           title="Sign out"
@@ -149,10 +168,12 @@ export function Sidebar({
   items,
   sectionLabel,
   user,
+  profileHref,
 }: {
   items: NavItem[];
   sectionLabel: string;
   user: SidebarUser;
+  profileHref: string;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -170,7 +191,7 @@ export function Sidebar({
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <Brand />
         <NavLinks items={items} sectionLabel={sectionLabel} pathname={pathname} />
-        <UserFooter user={user} onSignOut={signOut} />
+        <UserFooter user={user} profileHref={profileHref} onSignOut={signOut} />
       </aside>
 
       {/* Mobile top bar */}
@@ -197,7 +218,12 @@ export function Sidebar({
               pathname={pathname}
               onNavigate={() => setMobileOpen(false)}
             />
-            <UserFooter user={user} onSignOut={signOut} />
+            <UserFooter
+              user={user}
+              profileHref={profileHref}
+              onSignOut={signOut}
+              onNavigate={() => setMobileOpen(false)}
+            />
           </SheetContent>
         </Sheet>
       </div>

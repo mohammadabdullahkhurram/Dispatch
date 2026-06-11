@@ -5,7 +5,7 @@ import { isTeamRole, type UserRole } from "@/lib/types";
 // Next.js 16: middleware.ts was renamed to proxy.ts (same behavior).
 // Routes everyone by auth state + role: clients -> /portal, team -> /dashboard.
 
-const PUBLIC_PATHS = ["/login", "/api/webhooks"];
+const PUBLIC_PATHS = ["/login", "/reset-password", "/api/webhooks"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some(
