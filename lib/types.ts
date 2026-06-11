@@ -45,7 +45,20 @@ export interface UserProfile {
   role: UserRole;
   department_id: string | null;
   phone: string | null;
+  ghl_contact_id: string | null;
   created_at: string;
+}
+
+export type ClientUserRole = "owner" | "member";
+
+export interface ClientUser {
+  id: string;
+  client_id: string;
+  user_id: string;
+  role: ClientUserRole;
+  created_at: string;
+  // joined
+  user?: Pick<UserProfile, "id" | "email" | "full_name" | "avatar_url" | "ghl_contact_id"> | null;
 }
 
 export interface Department {

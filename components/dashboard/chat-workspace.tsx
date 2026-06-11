@@ -198,6 +198,50 @@ export function ChatWorkspace({
     setMessages((prev) =>
       prev.some((m) => m.id === data.id) ? prev : [...prev, data as ChatMessage]
     );
+
+    await mirrorToSmsIfNeeded(thread, content, messageType, metadata);
+  }
+
+  /**
+   * If the client's last message arrived via SMS (GHL webhook), mirror
+   * this reply to their phone so the conversation continues over text.
+   */
+  async function mirrorToSmsIfNeeded(
+    thread: ChatThread,
+    content: string | null,
+    messageType: MessageType,
+    metadata: Record<string, unknown> | null
+  ) {
+    if (!content) return;
+    if (messageType !== "text" && messageType !== "meet_link") return;
+
+    const lastClientMessage = [...messages]
+      .reverse()
+      .find((m) => m.sender_type === "client");
+    const source = (lastClientMessage?.metadata as { source?: string } | null)
+      ?.source;
+    if (source !== "sms") return;
+
+    const smsBody =
+      messageType === "meet_link"
+        ? `${content}: ${(metadata as { url?: string } | null)?.url ?? ""}`
+        : content;
+
+    try {
+      const res = await fetch("/api/chat/send-sms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: thread.id, message: smsBody }),
+      });
+      if (!res.ok) {
+        const { error: smsError } = await res
+          .json()
+          .catch(() => ({ error: `HTTP ${res.status}` }));
+        setError(`Message saved, but SMS mirror failed: ${smsError}`);
+      }
+    } catch {
+      setError("Message saved, but SMS mirror failed: network error.");
+    }
   }
 
   async function handleSend(e: React.FormEvent) {

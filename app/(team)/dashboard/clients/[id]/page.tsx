@@ -33,6 +33,7 @@ import {
 } from "@/components/badges";
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
+import { ClientTeam } from "@/components/dashboard/client-team";
 import { createClient } from "@/lib/supabase/server";
 import { formatDate, formatDateTime, shortId } from "@/lib/format";
 import type {
@@ -40,6 +41,7 @@ import type {
   ChecklistItem,
   Client,
   ClientDocument,
+  ClientUser,
   Task,
   Ticket,
 } from "@/lib/types";
@@ -63,7 +65,7 @@ export default async function ClientProfilePage({
   if (!clientRow) notFound();
   const client = clientRow as Client;
 
-  const [tickets, tasks, threads, documents, checklist, department] =
+  const [tickets, tasks, threads, documents, checklist, clientUsers, department] =
     await Promise.all([
       supabase
         .from("tickets")
@@ -88,6 +90,11 @@ export default async function ClientProfilePage({
       supabase
         .from("client_checklist_items")
         .select("*")
+        .eq("client_id", id)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("client_users")
+        .select("*, user:users(id, email, full_name, avatar_url, ghl_contact_id)")
         .eq("client_id", id)
         .order("created_at", { ascending: true }),
       client.assigned_department_id
@@ -140,6 +147,7 @@ export default async function ClientProfilePage({
       <Tabs defaultValue="overview" className="flex-1">
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="tickets">Tickets</TabsTrigger>
           <TabsTrigger value="tasks">Tasks</TabsTrigger>
           <TabsTrigger value="chat">Chat History</TabsTrigger>
@@ -210,6 +218,13 @@ export default async function ClientProfilePage({
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="team" className="mt-4">
+          <ClientTeam
+            clientId={id}
+            initialMembers={(clientUsers.data ?? []) as ClientUser[]}
+          />
         </TabsContent>
 
         <TabsContent value="tickets" className="mt-4">
