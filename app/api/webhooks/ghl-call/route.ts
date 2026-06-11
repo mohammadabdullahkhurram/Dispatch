@@ -1,18 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findClientByPhone } from "@/lib/phone";
 import type { Priority, TicketCategory } from "@/lib/types";
 
 /**
- * GoHighLevel call webhook. GHL runs the IVR, voice AI, and
- * transcription — we receive the finished artifacts:
- * { caller_phone, recording_url, transcript, ivr_selection, duration, timestamp }
+ * GoHighLevel call webhook. GHL runs the IVR, voice AI, transcription,
+ * and AI summarization — we receive the finished artifacts:
+ * { caller_phone, recording_url, transcript, ai_summary, ivr_selection,
+ *   duration, timestamp }
  *
- * Flow: map IVR digit → category → match client by phone → Claude
- * summarizes/triages the transcript → create a phone-sourced ticket →
- * drop a ticket card in the client's chat thread → notify the
- * department head.
+ * Flow: map IVR digit → category → match client by phone → create a
+ * phone-sourced ticket with GHL's summary → drop a ticket card in the
+ * client's chat thread → notify the department head.
  */
 
 const IVR_CATEGORIES: Record<string, TicketCategory> = {
@@ -31,96 +30,12 @@ const SLA_HOURS: Record<Priority, number> = {
   low: 48,
 };
 
-const CATEGORIES: TicketCategory[] = ["seo", "ghl", "software", "billing", "general"];
-const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
-
-interface CallTriage {
-  summary: string;
-  category: TicketCategory;
-  priority: Priority;
-  title: string;
-}
-
-/**
- * Ask Claude to summarize the call and confirm category/priority.
- * Note: the spec named claude-sonnet-4-20250514, but that model retires
- * 2026-06-15 — claude-sonnet-4-6 is its designated replacement.
- */
-async function triageWithClaude(
-  transcript: string,
-  ivrCategory: TicketCategory
-): Promise<CallTriage | null> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("[ghl-call] ANTHROPIC_API_KEY not set — skipping AI triage");
-    return null;
-  }
-
-  const client = new Anthropic();
-
-  try {
-    const response = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system:
-        "You triage support calls for Bluejaypro, a digital marketing agency. " +
-        "Categories: seo (search rankings, content, backlinks), ghl (GoHighLevel CRM, " +
-        "funnels, automations), software (websites, apps, technical bugs), billing " +
-        "(invoices, payments, plans), general (anything else). " +
-        "Priorities: urgent (business down, revenue blocked), high (major feature broken, " +
-        "angry client), medium (standard request), low (minor question or cosmetic issue).",
-      messages: [
-        {
-          role: "user",
-          content:
-            `A client called our support line and chose the "${ivrCategory}" IVR option. ` +
-            `Triage this call transcript:\n\n<transcript>\n${transcript}\n</transcript>\n\n` +
-            "Write a 2-3 sentence summary of the issue, a short ticket title, " +
-            "the correct category (the IVR choice may be wrong), and a priority.",
-        },
-      ],
-      output_config: {
-        format: {
-          type: "json_schema",
-          schema: {
-            type: "object",
-            properties: {
-              summary: {
-                type: "string",
-                description: "2-3 sentence summary of the caller's issue",
-              },
-              title: {
-                type: "string",
-                description: "Short ticket title, under 80 characters",
-              },
-              category: { type: "string", enum: CATEGORIES },
-              priority: { type: "string", enum: PRIORITIES },
-            },
-            required: ["summary", "title", "category", "priority"],
-            additionalProperties: false,
-          },
-        },
-      },
-    });
-
-    if (response.stop_reason === "refusal") {
-      console.warn("[ghl-call] Claude declined to triage this transcript");
-      return null;
-    }
-
-    const text = response.content.find((b) => b.type === "text")?.text;
-    if (!text) return null;
-    return JSON.parse(text) as CallTriage;
-  } catch (error) {
-    console.error("[ghl-call] Claude triage failed:", error);
-    return null;
-  }
-}
-
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as {
     caller_phone?: string;
     recording_url?: string;
     transcript?: string;
+    ai_summary?: string;
     ivr_selection?: string | number;
     duration?: number;
     timestamp?: string;
@@ -128,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   if (!payload?.caller_phone) {
     return NextResponse.json(
-      { error: "Expected { caller_phone, recording_url, transcript, ivr_selection, duration, timestamp }" },
+      { error: "Expected { caller_phone, recording_url, transcript, ai_summary, ivr_selection, duration, timestamp }" },
       { status: 400 }
     );
   }
@@ -141,25 +56,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, matched: false });
   }
 
-  const ivrCategory =
+  const category =
     IVR_CATEGORIES[String(payload.ivr_selection ?? "")] ?? "general";
+  const priority: Priority = "medium";
   const transcript = payload.transcript?.trim() ?? "";
+  const aiSummary = payload.ai_summary?.trim() || null;
 
-  // AI triage, with a deterministic fallback if Claude is unavailable.
-  const triage = transcript
-    ? await triageWithClaude(transcript, ivrCategory)
-    : null;
-
-  const category = triage?.category ?? ivrCategory;
-  const priority = triage?.priority ?? "medium";
-  const title =
-    triage?.title ??
-    `Phone call from ${client.company_name} (${ivrCategory.toUpperCase()})`;
+  // GHL's AI summary is the ticket description; fall back to the first
+  // 500 characters of the transcript when it's missing.
   const summary =
-    triage?.summary ??
+    aiSummary ??
     (transcript
-      ? `${transcript.slice(0, 280)}${transcript.length > 280 ? "…" : ""}`
+      ? `${transcript.slice(0, 500)}${transcript.length > 500 ? "…" : ""}`
       : "Voice call received — no transcript available.");
+
+  const title = `Phone call from ${client.company_name} (${category.toUpperCase()})`;
 
   const slaDeadline = new Date(
     Date.now() + SLA_HOURS[priority] * 3600_000
@@ -178,7 +89,7 @@ export async function POST(request: NextRequest) {
       department_id: client.assigned_department_id,
       voice_recording_url: payload.recording_url ?? null,
       transcription: transcript || null,
-      ai_summary: triage?.summary ?? null,
+      ai_summary: aiSummary,
       sla_deadline: slaDeadline,
       created_at: payload.timestamp ?? undefined,
     })
@@ -211,7 +122,7 @@ export async function POST(request: NextRequest) {
         source: "phone",
         client_id: client.id,
         ivr_selection: payload.ivr_selection ?? null,
-        ai_triaged: !!triage,
+        has_ai_summary: !!aiSummary,
         duration: payload.duration ?? null,
       },
     }),

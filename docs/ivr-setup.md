@@ -1,8 +1,9 @@
 # IVR & Call Pipeline Setup
 
 GHL answers the phone, runs the IVR menu and voice AI, records the call,
-and transcribes it. When the call ends, GHL posts everything to Dispatch,
-which creates a triaged support ticket automatically.
+transcribes it, and generates the AI summary. When the call ends, GHL
+posts everything to Dispatch, which creates a support ticket
+automatically.
 
 ## 1. IVR menu → ticket category
 
@@ -39,6 +40,7 @@ Payload mapping:
   "caller_phone": "{{contact.phone}}",
   "recording_url": "{{call.recording_url}}",
   "transcript": "{{call.transcription}}",
+  "ai_summary": "{{call.ai_summary}}",
   "ivr_selection": "{{call.ivr_selection}}",
   "duration": "{{call.duration}}",
   "timestamp": "{{call.ended_at}}"
@@ -46,25 +48,21 @@ Payload mapping:
 ```
 
 > Field tokens vary by GHL plan/version — match whatever your workflow
-> builder exposes for the recording URL, transcript text, and the IVR
-> digit. The names on the left are what Dispatch expects.
+> builder exposes for the recording URL, transcript text, AI summary,
+> and the IVR digit. The names on the left are what Dispatch expects.
 
 ## 3. What Dispatch does on receipt
 
 1. **Client match** — `caller_phone` against `clients.phone`
    (last-10-digit comparison). Unknown callers are acknowledged and
    logged, not ticketed.
-2. **AI triage** — the transcript is sent to Claude
-   (`claude-sonnet-4-6`) which returns structured JSON: a 2–3 sentence
-   issue summary, a short title, a confirmed category (it may override
-   the IVR digit if the caller pressed the wrong one), and a suggested
-   priority (`low` / `medium` / `high` / `urgent`). If `ANTHROPIC_API_KEY`
-   isn't set or the call fails, Dispatch falls back to the IVR category,
-   `medium` priority, and a truncated transcript as the summary.
+2. **Summary** — GHL's `ai_summary` is saved on the ticket and used as
+   its description. If GHL sends no summary, Dispatch falls back to the
+   first 500 characters of the transcript.
 3. **Ticket creation** — a ticket is inserted with `source: "phone"`,
-   `status: "open"`, the recording URL, full transcription, AI summary,
-   the client's assigned department, and an SLA deadline from priority
-   (urgent 4h / high 8h / medium 24h / low 48h).
+   `status: "open"`, `medium` priority (24h SLA), the IVR category, the
+   recording URL, full transcription, the AI summary, and the client's
+   assigned department.
 4. **Chat card** — a `ticket_card` message is posted into the client's
    active chat thread (opened if needed), so both the client portal and
    team chat show the new ticket inline.
@@ -72,7 +70,7 @@ Payload mapping:
    a notification linking to the ticket queue.
 6. **Audit trail** — entries are written to `ticket_activity_log`
    (`created_from_call`) and `audit_logs` (`ticket_created`, with the
-   IVR digit, call duration, and whether AI triage ran).
+   IVR digit, call duration, and whether GHL sent an AI summary).
 
 The ticket appears in **Dashboard → Tickets** (Open column) with the
 recording playable and the transcript readable in the detail slide-over.
@@ -86,6 +84,7 @@ curl -X POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call \
     "caller_phone": "+15551234567",
     "recording_url": "https://example.com/recording.mp3",
     "transcript": "Hi, this is Jane from Acme. Our checkout page has been throwing errors since this morning and we are losing orders. Please call me back as soon as possible.",
+    "ai_summary": "Jane from Acme reports their checkout page has been erroring since this morning and they are losing orders. She requests an urgent callback.",
     "ivr_selection": "3",
     "duration": 95,
     "timestamp": "2026-06-11T15:30:00Z"
@@ -93,5 +92,6 @@ curl -X POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call \
 ```
 
 Expected: `200 { "received": true, "ticket_id": "..." }`, a new
-high/urgent `software` ticket for the matched client, a ticket card in
-their chat thread, and a notification for the department head.
+`software` ticket for the matched client with GHL's summary as the
+description, a ticket card in their chat thread, and a notification for
+the department head.

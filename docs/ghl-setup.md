@@ -14,7 +14,6 @@ Add these to `.env.local` (and your Vercel project settings):
 | `GHL_API_KEY` | GHL → Settings → Private Integrations → create a token with `conversations/message.write` and `contacts.readonly` scopes |
 | `GHL_LOCATION_ID` | GHL → Settings → Business Profile (the sub-account/location id) |
 | `GHL_PHONE_NUMBER` | The SMS-enabled number on the location, E.164 format (`+15551234567`) |
-| `ANTHROPIC_API_KEY` | console.anthropic.com → API Keys (used to triage call transcripts) |
 
 ## 2. Webhook endpoints
 
