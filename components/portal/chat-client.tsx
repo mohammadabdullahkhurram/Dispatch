@@ -107,7 +107,7 @@ export function PortalChat({
   }
 
   return (
-    <div className="flex h-[calc(100vh-57px)] flex-1 flex-col md:h-screen">
+    <div className="flex h-[calc(100vh-57px)] flex-1 flex-col overflow-hidden md:h-screen">
       <header className="border-b border-border px-6 py-4">
         <h1 className="text-lg font-semibold tracking-tight">Chat Support</h1>
         <p className="text-xs text-muted-foreground">
@@ -116,7 +116,7 @@ export function PortalChat({
         </p>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
         {messages.length === 0 ? (
           <EmptyState
             icon={MessageSquare}

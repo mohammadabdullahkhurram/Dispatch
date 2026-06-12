@@ -65,42 +65,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, matched: false });
   }
 
-  // SMS goes to a support SESSION, never the workspace thread.
-  // Reuse the client's active session or open a new one.
-  let { data: thread } = await supabase
-    .from("chat_threads")
-    .select("id")
-    .eq("client_id", client.id)
-    .eq("status", "active")
-    .not("category", "in", '("workspace","internal")')
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!thread) {
-    const { data: newThread, error: threadError } = await supabase
-      .from("chat_threads")
-      .insert({
-        client_id: client.id,
-        status: "active",
-        category: "general",
-        last_message_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-
-    if (threadError || !newThread) {
-      console.error("[ghl-sms] Session create failed:", threadError?.message);
-      return NextResponse.json(
-        { error: "Failed to open chat session" },
-        { status: 500 }
-      );
-    }
-    thread = newThread;
-  }
-
   // Attribute the SMS to the specific person on the client's roster
-  // whose phone matches, so chat shows who actually texted.
+  // whose phone matches — they become the message sender and the
+  // session's point of contact.
   const { data: roster } = await supabase
     .from("client_users")
     .select("user:users(id, phone)")
@@ -116,6 +83,46 @@ export async function POST(request: NextRequest) {
         } | null;
       })
       .find((u) => u && phonesMatch(u.phone, payload.phone!))?.id ?? null;
+
+  // SMS goes to a support SESSION, never the workspace thread.
+  // Reuse the client's active session or open a new one.
+  let { data: thread } = await supabase
+    .from("chat_threads")
+    .select("id, point_of_contact_id")
+    .eq("client_id", client.id)
+    .eq("status", "active")
+    .not("category", "in", '("workspace","internal","dm")')
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!thread) {
+    const { data: newThread, error: threadError } = await supabase
+      .from("chat_threads")
+      .insert({
+        client_id: client.id,
+        status: "active",
+        category: "general",
+        point_of_contact_id: senderId,
+        last_message_at: new Date().toISOString(),
+      })
+      .select("id, point_of_contact_id")
+      .single();
+
+    if (threadError || !newThread) {
+      console.error("[ghl-sms] Session create failed:", threadError?.message);
+      return NextResponse.json(
+        { error: "Failed to open chat session" },
+        { status: 500 }
+      );
+    }
+    thread = newThread;
+  } else if (!thread.point_of_contact_id && senderId) {
+    await supabase
+      .from("chat_threads")
+      .update({ point_of_contact_id: senderId })
+      .eq("id", thread.id);
+  }
 
   const { error: messageError } = await supabase.from("chat_messages").insert({
     thread_id: thread.id,

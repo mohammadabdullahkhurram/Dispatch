@@ -210,13 +210,15 @@ export interface ChatThread {
   id: string;
   client_id: string | null; // null for internal team threads
   status: ThreadStatus;
-  category: string | null; // "workspace", "internal", or an issue category
+  category: string | null; // "workspace", "internal", "dm", or an issue category
   title: string | null;
   participant_ids: string[] | null;
   created_by: string | null;
   linked_ticket_id: string | null;
+  point_of_contact_id: string | null;
   last_message_at: string | null;
   created_at: string;
+  poc?: Pick<UserProfile, "id" | "full_name"> | null;
   client?: Pick<
     Client,
     "id" | "company_name" | "contact_name" | "logo_url"

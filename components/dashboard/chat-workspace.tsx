@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   MessageSquare,
-  Phone,
   Plus,
   SendHorizonal,
   Slash,
@@ -36,7 +35,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit, logTicketActivity } from "@/lib/audit";
-import { formatDuration, timeAgo } from "@/lib/format";
+import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   CannedResponse,
@@ -51,16 +50,18 @@ const SLASH_COMMANDS = [
   { cmd: "/ticket", hint: "Create a ticket from this conversation", icon: TicketIcon },
   { cmd: "/meet", hint: "Send a Google Meet link", icon: Video },
   { cmd: "/canned", hint: "Insert a canned response", icon: MessageSquare },
-  { cmd: "/call", hint: "Log a phone call note", icon: Phone },
 ];
 
 type TeamMemberOption = Pick<UserProfile, "id" | "full_name" | "avatar_url">;
 type ClientOption = Pick<Client, "id" | "company_name" | "logo_url">;
 
-/** Display name for a thread — internal threads use their title. */
+/** Display name for a thread — internal/DM threads use their title. */
 function threadName(thread: ChatThread): string {
   if (thread.category === "internal") {
     return thread.title ?? "Internal chat";
+  }
+  if (thread.category === "dm") {
+    return thread.title ?? "Direct message";
   }
   return thread.client?.company_name ?? "Unknown client";
 }
@@ -100,10 +101,12 @@ export function ChatWorkspace({
   const [ticketDialogOpen, setTicketDialogOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [quickBusy, setQuickBusy] = useState(false);
-  const [activeCall, setActiveCall] = useState<{
-    contactName: string;
-    startedAt: number;
-  } | null>(null);
+
+  // Client roster shown as the Members section on workspace chats.
+  const [roster, setRoster] = useState<
+    { user_id: string; full_name: string; avatar_url: string | null }[]
+  >([]);
+  const [rosterClientId, setRosterClientId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Derived loading flag: true until messages for the active thread land.
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -119,17 +122,19 @@ export function ChatWorkspace({
   );
   const loadingMessages = !!activeId && loadedThreadId !== activeId;
 
-  // Workspace threads are permanent (no archive concept); sessions and
-  // internal threads split into active/archived.
+  // Workspace threads (and DMs, which live in the Workspace tab) are
+  // permanent; sessions and internal threads split active/archived.
   const visibleThreads = useMemo(
     () =>
       threads.filter((t) => {
         const scopeMatch =
           chatScope === "workspace"
-            ? t.category === "workspace"
+            ? t.category === "workspace" || t.category === "dm"
             : chatScope === "internal"
               ? t.category === "internal"
-              : t.category !== "workspace" && t.category !== "internal";
+              : t.category !== "workspace" &&
+                t.category !== "internal" &&
+                t.category !== "dm";
         if (!scopeMatch) return false;
         if (chatScope === "workspace") return true;
         return threadView === "active"
@@ -152,6 +157,44 @@ export function ChatWorkspace({
   const matchingCommands = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(draft.toLowerCase()));
   const showCannedPicker =
     cannedOpen || draft.toLowerCase().startsWith("/canned");
+
+  // Load the client roster when a workspace thread is active.
+  useEffect(() => {
+    const clientId =
+      active?.category === "workspace" ? active.client_id : null;
+    if (!clientId) return;
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from("client_users")
+      .select("user_id, user:users(id, full_name, avatar_url)")
+      .eq("client_id", clientId)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const members = (data ?? [])
+          .map((row) => {
+            const rel = row.user as unknown;
+            const user = (Array.isArray(rel) ? rel[0] : rel) as {
+              id: string;
+              full_name: string;
+              avatar_url: string | null;
+            } | null;
+            return user
+              ? {
+                  user_id: user.id,
+                  full_name: user.full_name,
+                  avatar_url: user.avatar_url,
+                }
+              : null;
+          })
+          .filter((m): m is NonNullable<typeof m> => m !== null);
+        setRoster(members);
+        setRosterClientId(clientId);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
 
   // Unread counts for the thread list.
   useEffect(() => {
@@ -253,29 +296,6 @@ export function ChatWorkspace({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  // The widget hides itself when the call's completion log arrives
-  // from the ghl-call-log webhook (derived, not an effect).
-  const callFinished = useMemo(() => {
-    if (!activeCall) return false;
-    return messages.some((m) => {
-      if (m.message_type !== "call_log") return false;
-      const meta = (m.metadata ?? {}) as { status?: string };
-      return (
-        !!meta.status &&
-        meta.status !== "initiated" &&
-        new Date(m.sent_at).getTime() >= activeCall.startedAt
-      );
-    });
-  }, [messages, activeCall]);
-  const showCallWidget = !!activeCall && !callFinished;
-
-  // Tick the call widget's elapsed timer once a second.
-  const [, setCallTick] = useState(0);
-  useEffect(() => {
-    if (!showCallWidget) return;
-    const interval = setInterval(() => setCallTick((n) => n + 1), 1000);
-    return () => clearInterval(interval);
-  }, [showCallWidget]);
 
   async function sendMessage(
     thread: ChatThread,
@@ -324,9 +344,14 @@ export function ChatWorkspace({
     messageType: MessageType,
     metadata: Record<string, unknown> | null
   ) {
-    // Only support sessions mirror to SMS — workspace and internal
-    // threads are web-only.
-    if (thread.category === "workspace" || thread.category === "internal") return;
+    // Only support sessions mirror to SMS — workspace, internal, and
+    // DM threads are web-only.
+    if (
+      thread.category === "workspace" ||
+      thread.category === "internal" ||
+      thread.category === "dm"
+    )
+      return;
     if (!content) return;
     if (messageType !== "text" && messageType !== "meet_link") return;
 
@@ -372,9 +397,6 @@ export function ChatWorkspace({
     } else if (text.startsWith("/meet")) {
       const url = text.replace("/meet", "").trim() || "https://meet.google.com/new";
       await sendMessage(active, "Join our Google Meet", "meet_link", { url });
-    } else if (text.startsWith("/call")) {
-      const note = text.replace("/call", "").trim() || "Call requested";
-      await sendMessage(active, `📞 ${note}`, "text");
     } else {
       await sendMessage(active, text, "text");
     }
@@ -509,40 +531,64 @@ export function ChatWorkspace({
   }
 
   /**
-   * Call the client: posts a call_log to the thread and opens the GHL
-   * dialer deep link (GHL has no remote-dial API — the agent's browser
-   * softphone connects first, then GHL bridges to the client from the
-   * Dispatch number). Status/duration/recording arrive later via the
-   * ghl-call-log webhook.
+   * Open (or create) a 1-on-1 DM with a client user. DM threads are
+   * category 'dm' — RLS limits them to the two participants plus
+   * agency owners/admins.
    */
-  async function quickCall() {
-    if (!active || quickBusy) return;
-    setQuickBusy(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/calls/initiate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ threadId: active.id }),
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        url?: string;
-        contactName?: string;
-        error?: string;
-      };
-      if (!res.ok || !data.url) {
-        setError(data.error ?? `Call setup failed (HTTP ${res.status}).`);
-      } else {
-        setActiveCall({
-          contactName: data.contactName ?? "client",
-          startedAt: Date.now(),
-        });
-        window.open(data.url, "_blank", "noopener");
-      }
-    } catch {
-      setError("Call setup failed: network error.");
+  async function openDm(member: {
+    user_id: string;
+    full_name: string;
+  }) {
+    if (!active?.client_id) return;
+    const pair = [currentUser.id, member.user_id].sort();
+
+    const existing = threads.find(
+      (t) =>
+        t.category === "dm" &&
+        t.client_id === active.client_id &&
+        t.participant_ids &&
+        [...t.participant_ids].sort().join(",") === pair.join(",")
+    );
+    if (existing) {
+      setActiveId(existing.id);
+      return;
     }
-    setQuickBusy(false);
+
+    const supabase = createClient();
+    const { data: thread, error: createError } = await supabase
+      .from("chat_threads")
+      .insert({
+        client_id: active.client_id,
+        status: "active",
+        category: "dm",
+        title: member.full_name,
+        participant_ids: pair,
+        created_by: currentUser.id,
+        point_of_contact_id: member.user_id,
+        last_message_at: new Date().toISOString(),
+      })
+      .select(
+        `*,
+         client:clients(id, company_name, contact_name, logo_url),
+         poc:users!chat_threads_point_of_contact_id_fkey(id, full_name)`
+      )
+      .single();
+
+    if (createError || !thread) {
+      setError(createError?.message ?? "Failed to open the DM.");
+      return;
+    }
+
+    await logAudit(supabase, {
+      userId: currentUser.id,
+      entityType: "chat_thread",
+      entityId: thread.id,
+      action: "dm_thread_created",
+      details: { with_user: member.user_id },
+    });
+
+    setThreads((prev) => [thread as ChatThread, ...prev]);
+    setActiveId(thread.id);
   }
 
   /** Internal: reuse the thread with this exact participant set, or create one. */
@@ -688,7 +734,7 @@ export function ChatWorkspace({
   }
 
   return (
-    <div className="flex h-[calc(100vh-57px)] flex-1 md:h-[calc(100vh-53px)]">
+    <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden md:h-[calc(100vh-53px)]">
       {/* Thread list */}
       <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-80">
         <div className="space-y-2.5 border-b border-border px-4 py-3.5">
@@ -819,10 +865,48 @@ export function ChatWorkspace({
             })
           )}
         </div>
+        {/* Members of the active workspace's client — DM from here. */}
+        {chatScope === "workspace" &&
+          active?.category === "workspace" &&
+          rosterClientId === active.client_id &&
+          roster.length > 0 && (
+            <div className="border-t border-border p-3">
+              <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Members — {active.client?.company_name}
+              </p>
+              <ul className="max-h-44 space-y-0.5 overflow-y-auto">
+                {roster.map((member) => (
+                  <li
+                    key={member.user_id}
+                    className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5"
+                  >
+                    <UserAvatar
+                      name={member.full_name}
+                      avatarUrl={member.avatar_url}
+                      className="size-6"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-sm">
+                      {member.full_name}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      title={`Message ${member.full_name} directly`}
+                      aria-label={`Message ${member.full_name} directly`}
+                      onClick={() => openDm(member)}
+                    >
+                      <MessageSquare className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
       </aside>
 
       {/* Chat panel */}
-      <div className="hidden min-w-0 flex-1 flex-col sm:flex">
+      <div className="hidden min-h-0 min-w-0 flex-1 flex-col overflow-hidden sm:flex">
         {!active ? (
           <div className="flex flex-1 items-center justify-center p-8">
             <EmptyState
@@ -851,9 +935,11 @@ export function ChatWorkspace({
                   <p className="text-xs text-muted-foreground">
                     {active.category === "workspace"
                       ? "Workspace · Always active"
-                      : active.category === "internal"
-                        ? `Internal team · ${active.status === "active" ? "Active" : "Closed"}`
-                        : `${active.category ?? "general"} session · ${active.status === "active" ? "Active" : "Closed"}`}
+                      : active.category === "dm"
+                        ? `Direct message · ${active.client?.company_name ?? ""}`
+                        : active.category === "internal"
+                          ? `Internal team · ${active.status === "active" ? "Active" : "Closed"}`
+                          : `${active.category ?? "general"} session · ${active.status === "active" ? "Active" : "Closed"}${active.poc?.full_name ? ` · Point of contact: ${active.poc.full_name}` : ""}`}
                   </p>
                 </div>
               </div>
@@ -890,18 +976,6 @@ export function ChatWorkspace({
                     >
                       <MessageSquare className="size-4 text-muted-foreground" />
                     </Button>
-                    {active.category !== "internal" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Call this client via the GHL dialer"
-                        aria-label="Call this client via the GHL dialer"
-                        onClick={quickCall}
-                        disabled={quickBusy}
-                      >
-                        <Phone className="size-4 text-muted-foreground" />
-                      </Button>
-                    )}
                     {active.category !== "workspace" && (
                       <Button
                         variant="outline"
@@ -993,7 +1067,7 @@ export function ChatWorkspace({
                   onChange={(e) => setDraft(e.target.value)}
                   placeholder={
                     active.status === "active"
-                      ? "Message, or / for commands (/ticket, /meet, /canned, /call)…"
+                      ? "Message, or / for commands (/ticket, /meet, /canned)…"
                       : "This thread is closed."
                   }
                   disabled={active.status !== "active"}
@@ -1016,34 +1090,6 @@ export function ChatWorkspace({
           </>
         )}
       </div>
-
-      {/* Floating call status widget */}
-      {showCallWidget && activeCall && (
-        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 shadow-lg">
-          <span className="relative flex size-9 items-center justify-center rounded-full bg-emerald-500/15">
-            <Phone className="size-4 text-emerald-400" />
-            <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/20" />
-          </span>
-          <div className="leading-tight">
-            <p className="text-sm font-medium">
-              Call with {activeCall.contactName}
-            </p>
-            <p className="text-xs tabular-nums text-muted-foreground">
-              {formatDuration(
-                Math.floor((Date.now() - activeCall.startedAt) / 1000)
-              )}{" "}
-              · complete it in the GHL dialer tab
-            </p>
-          </div>
-          <button
-            onClick={() => setActiveCall(null)}
-            className="ml-1 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label="Dismiss call status"
-          >
-            ✕
-          </button>
-        </div>
-      )}
 
       {/* Quick-action: create ticket from chat context */}
       <Dialog open={ticketDialogOpen} onOpenChange={setTicketDialogOpen}>

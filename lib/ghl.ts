@@ -21,18 +21,6 @@ function ghlHeaders() {
 export const DISPATCH_TAG = "dispatch-user";
 
 /**
- * Deep link to a contact inside the GHL web app. GHL exposes no API
- * to dial programmatically — calls are placed in their browser
- * softphone (agent's WebRTC leg connects first, then GHL/Twilio
- * bridges to the contact FROM the location's number).
- */
-export function ghlContactDeepLink(contactId: string): string | null {
-  const locationId = process.env.GHL_LOCATION_ID;
-  if (!locationId) return null;
-  return `https://app.gohighlevel.com/v2/location/${locationId}/contacts/detail/${contactId}`;
-}
-
-/**
  * Live check that the configured credentials actually work — fetches
  * one contact from the location. Returns the real API outcome.
  */

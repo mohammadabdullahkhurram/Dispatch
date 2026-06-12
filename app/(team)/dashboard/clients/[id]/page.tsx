@@ -37,6 +37,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ClientTeam } from "@/components/dashboard/client-team";
 import { ClientStatusToggle } from "@/components/dashboard/client-status-toggle";
 import { DeleteClientButton } from "@/components/dashboard/delete-client-button";
+import { EditClientDialog } from "@/components/dashboard/edit-client-dialog";
 import { DeleteWorkspaceChatButton } from "@/components/dashboard/delete-workspace-chat-button";
 import { getCurrentProfile } from "@/lib/data";
 import { formatDate, formatDateTime, shortId } from "@/lib/format";
@@ -147,6 +148,9 @@ export default async function ClientProfilePage({
             </Badge>
           )}
           <OnboardingBadge status={client.onboarding_status} />
+          {profile && (
+            <EditClientDialog client={client} currentUserId={profile.id} />
+          )}
           {profile && isAgencyManagerRole(profile.role) && (
             <ClientStatusToggle
               clientId={client.id}

@@ -15,7 +15,11 @@ export default async function TeamChatPage() {
   const [threads, canned, teamMembers, clients] = await Promise.all([
     supabase
       .from("chat_threads")
-      .select("*, client:clients(id, company_name, contact_name, logo_url)")
+      .select(
+        `*,
+         client:clients(id, company_name, contact_name, logo_url),
+         poc:users!chat_threads_point_of_contact_id_fkey(id, full_name)`
+      )
       .order("last_message_at", { ascending: false, nullsFirst: false }),
     supabase.from("canned_responses").select("*").order("title"),
     supabase

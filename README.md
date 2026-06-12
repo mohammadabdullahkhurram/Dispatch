@@ -41,17 +41,16 @@ dispatch/
 │   │   └── settings/            # 6 tabs + profile + checklist-templates pages
 │   └── api/
 │       ├── webhooks/ghl-sms/      # Inbound SMS (tag-gated) → session chat
-│       ├── webhooks/ghl-call/     # Completed IVR call → ticket + notification
-│       ├── webhooks/ghl-call-log/ # Call Status workflow → call_log message
+│       ├── webhooks/ghl-call/     # Completed IVR call → ticket + session + call_log
 │       ├── chat/send-sms/         # Mirror team reply to SMS via GHL
-│       ├── calls/initiate/        # Resolve GHL contact, open dialer deep link
 │       ├── clients/[id]/users/    # Add/remove client users (+ GHL tagging)
 │       ├── integrations/ghl-test/ # Live GHL credential check
 │       └── team/[userId]/         # Remove internal team member
 ├── components/                  # ui/ (shadcn), dashboard/, portal/, chat/, shared
 ├── lib/                         # supabase clients (browser/server/admin/proxy),
 │                                #   ghl.ts, phone.ts, audit.ts, types.ts, format.ts
-├── supabase/migrations/         # 001–009 (see Migrations)
+├── supabase/migrations/         # 001–010 (see Migrations)
+├── scripts/                     # reset_test_data.sql (wipe test data, keep users)
 └── docs/                        # ghl-setup.md, ivr-setup.md
 ```
 
@@ -71,7 +70,7 @@ dispatch/
 
 ### Client Management
 - ✅ Create clients (role-gated dialog; auto-applies checklist templates + creates workspace chat via triggers)
-- 🔧 Edit clients — clients edit their own company info in the portal; no team-side edit form yet
+- ✅ Edit clients (team-side dialog: company, contact, email, phone, Drive URL — audit-logged; clients also edit their own company info in the portal)
 - ✅ Delete clients (owner/admin, type-`Delete` confirmation, cascade, audit-logged)
 - ✅ Client profile with **8 tabs**: Overview, Team, Tickets, Tasks, Chat History, Documents, Checklist, Branding
 - ✅ Active/inactive status (closes sessions, hides from default list, blocks portal access; reactivation restores)
@@ -94,17 +93,19 @@ dispatch/
 
 ### Chat System
 - ✅ **Workspace chat** — persistent, one per client, never archives, web-only
-- ✅ **Support sessions** — SMS/call/team-originated, issue-categorized, active → closed, optional linked ticket
+- ✅ **Support sessions** — auto-created by web ticket submission, SMS, calls, or the team; issue-categorized; active → closed; optional linked ticket (auto-close on resolve)
+- ✅ **Point of contact** on sessions — the submitting client user (web) or phone-matched roster member (SMS/call), shown in the session header
+- ✅ **DMs** — Members section on workspace chats lists the client's users; 1-on-1 `dm` threads visible only to the two participants + agency owners/admins (RLS-enforced)
 - ✅ **Dispatch Bot** — DB triggers post "New ticket opened/Ticket resolved" cards (distinct bot styling) into the workspace
-- ✅ SMS ↔ chat bridge: inbound via webhook (sender matched to roster member), outbound mirroring based on the most recent inbound message's source
-- ✅ Slash commands + immediate icon shortcuts: `/ticket`, `/meet`, `/canned`, `/call`
-- ✅ Realtime via Supabase (messages, unread badges, notification bell)
+- ✅ SMS ↔ chat bridge: inbound via webhook (sender matched to roster member), outbound mirroring based on the most recent inbound message's source (sessions only — workspace/internal/DM are web-only)
+- ✅ Slash commands + immediate icon shortcuts: `/ticket`, `/meet`, `/canned`
+- ✅ **No in-app calling** — by design. Live conversations use Google Meet (Meet icon posts a join card); inbound IVR calls are logged as `call_log` messages with recording + duration in their session
+- ✅ Realtime via Supabase (messages, unread badges, notification bell); scroll contained to the message list
 - 🔧 Read receipts: `read_at` tracked, unread counts shown, marked read on open — no per-message "seen" UI
 - ❌ Typing indicators
 - ✅ Canned responses (CRUD in settings, picker in chat)
 - ✅ Internal team chat (direct/group threads with participant reuse)
 - ✅ Archived sessions view (read-only until client reactivation)
-- ✅ Click-to-call from chat — GHL has **no remote-dial API**, so the Call button posts a `call_log`, opens the contact in GHL's dialer (calls go out from the Dispatch number), shows a floating in-call widget, and the Call Status webhook logs status/duration/recording back into the session
 
 ### Task Manager
 - ✅ Create tasks per department/client (modal with all fields)
@@ -131,11 +132,10 @@ dispatch/
 
 ### GHL Integration
 - ✅ Inbound SMS webhook (`/api/webhooks/ghl-sms`) — **tag-gated**: only contacts tagged `dispatch-user` reach chat (fail-closed)
-- ✅ Inbound call webhook (`/api/webhooks/ghl-call`) — IVR digit → category, ticket + session + notification
-- ✅ Call log webhook (`/api/webhooks/ghl-call-log`) — both directions, duration + recording
+- ✅ Inbound call webhook (`/api/webhooks/ghl-call`) — IVR digit → category, ticket + linked session (with `call_log` recording message + point of contact) + department-head notification
 - ✅ Outbound SMS from chat (LeadConnector API, contact-id reuse + phone lookup)
 - ✅ Contact tagging on client-user add/remove
-- ✅ Outbound calling via dialer deep link (see Chat above)
+- ❌ Outbound calling — intentionally removed; GHL involvement is inbound webhooks + outbound SMS only
 - 🔧 IVR workflow (Workflow 1) — draft in GHL
 - 🔧 Transcript/AI summary workflow (Workflow 2, "Dispatch Call Inbound") — in progress in GHL
 
@@ -166,10 +166,11 @@ dispatch/
 | 007 | `internal_chat` | Nullable `chat_threads.client_id`, thread title/participants/creator |
 | 008 | `chat_restructure` | Workspace vs sessions split, `bot` sender type, `linked_ticket_id`, Dispatch Bot triggers, session auto-close |
 | 009 | `call_log` | `call_log` message type for call records |
+| 010 | `dm_poc_sessions` | `point_of_contact_id` on threads, session auto-create for web tickets, DM threads with participant-scoped RLS |
 
 ## GHL Setup
 
-In GHL you need: a private integration token (scopes above), three workflow webhooks pointed at `https://dispatch.loopflo.io/api/webhooks/...` (inbound SMS, completed IVR call, call status), the `dispatch-user` tag convention, and the IVR menu mapping digits 1–5 to ticket categories.
+In GHL you need: a private integration token (scopes above), two workflow webhooks pointed at `https://dispatch.loopflo.io/api/webhooks/...` (inbound SMS, completed IVR call), the `dispatch-user` tag convention, and the IVR menu mapping digits 1–5 to ticket categories.
 
 Full guides: **[docs/ghl-setup.md](docs/ghl-setup.md)** (env vars, webhook payload mappings, SMS mirroring, calling) and **[docs/ivr-setup.md](docs/ivr-setup.md)** (IVR menu, post-call payload, test calls).
 
@@ -179,7 +180,7 @@ Full guides: **[docs/ghl-setup.md](docs/ghl-setup.md)** (env vars, webhook paylo
 - **Team invite emails** — invites are recorded but not sent; needs `auth.admin.inviteUserByEmail` + SMTP
 - **Client-side task visibility** — tasks are team-only today
 - **Brand kit editing** — colors/fonts are display-only jsonb
-- **Team-side client editing** — no edit form on the dashboard client profile
+- **Portal DM view** — clients have RLS access to their DM threads but no portal UI for them yet (portal chat shows the workspace thread)
 - **GHL Workflows 1 & 2** — IVR and transcript/AI-summary workflows still being finished in GHL
 - **Toll-free number verification** — pending with GHL/carrier
 - **Webhook authentication** — GHL custom webhooks are unsigned; add a shared-secret query param (noted in docs)

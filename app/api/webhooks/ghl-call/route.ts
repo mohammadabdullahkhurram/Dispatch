@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findClientByPhone } from "@/lib/phone";
+import { findClientByPhone, phonesMatch } from "@/lib/phone";
+import { formatDuration } from "@/lib/format";
 import type { Priority, TicketCategory } from "@/lib/types";
 
 /**
@@ -114,17 +115,65 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Each call opens a fresh support session linked to its ticket, so
-  // the session auto-closes when the ticket resolves. The workspace
-  // announcement comes from the Dispatch Bot DB trigger.
-  await Promise.all([
-    supabase.from("chat_threads").insert({
+  // The caller becomes the session's point of contact when their
+  // phone matches someone on the client's roster.
+  const { data: roster } = await supabase
+    .from("client_users")
+    .select("user:users(id, phone)")
+    .eq("client_id", client.id);
+  const pocId =
+    (roster ?? [])
+      .map((row) => {
+        const rel = row.user as unknown;
+        return (Array.isArray(rel) ? rel[0] : rel) as {
+          id: string;
+          phone: string | null;
+        } | null;
+      })
+      .find((u) => u && phonesMatch(u.phone, payload.caller_phone!))?.id ??
+    null;
+
+  // Each call opens a fresh support session linked to its ticket (it
+  // auto-closes when the ticket resolves), seeded with a call_log
+  // message carrying the recording. The workspace announcement comes
+  // from the Dispatch Bot DB trigger.
+  const { data: session } = await supabase
+    .from("chat_threads")
+    .insert({
       client_id: client.id,
       status: "active",
       category,
       linked_ticket_id: ticket.id,
+      point_of_contact_id: pocId,
       last_message_at: new Date().toISOString(),
-    }),
+    })
+    .select("id")
+    .single();
+
+  const duration =
+    payload.duration != null ? Number(payload.duration) : null;
+
+  await Promise.all([
+    session
+      ? supabase.from("chat_messages").insert({
+          thread_id: session.id,
+          sender_id: pocId,
+          sender_type: "client",
+          content:
+            `Inbound call` +
+            (duration != null && !Number.isNaN(duration)
+              ? ` · ${formatDuration(duration)}`
+              : ""),
+          message_type: "call_log",
+          metadata: {
+            direction: "inbound",
+            status: "completed",
+            duration,
+            recording_url: payload.recording_url ?? null,
+            phone: payload.caller_phone,
+          },
+        })
+      : Promise.resolve(),
     supabase.from("ticket_activity_log").insert({
       ticket_id: ticket.id,
       user_id: null,
