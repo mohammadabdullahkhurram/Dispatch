@@ -363,8 +363,15 @@ export function SettingsTabs({
         </p>
       )}
 
-      <Tabs defaultValue="general" className="flex-1">
-        <TabsList className="flex-wrap">
+      <Tabs
+        defaultValue="general"
+        orientation="vertical"
+        className="flex-1 flex-col gap-6 md:flex-row"
+      >
+        <TabsList
+          variant="line"
+          className="w-full shrink-0 flex-row flex-wrap items-start md:w-40 md:flex-col"
+        >
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="departments">Departments</TabsTrigger>
@@ -374,7 +381,7 @@ export function SettingsTabs({
           {/* Routes to its own page; styled to sit with the tabs. */}
           <Link
             href="/dashboard/settings/checklist-templates"
-            className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             Checklist Templates <ArrowUpRight className="size-3.5" />
           </Link>
@@ -700,7 +707,7 @@ export function SettingsTabs({
                         aria-label={`Copy ${label} URL`}
                       >
                         {copied === path ? (
-                          <Check className="size-4 text-emerald-400" />
+                          <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
                         ) : (
                           <Copy className="size-4" />
                         )}
@@ -733,8 +740,8 @@ export function SettingsTabs({
                           variant="outline"
                           className={
                             set
-                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                              : "border-red-500/30 bg-red-500/10 text-red-400"
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
                           }
                         >
                           {set ? "Set" : "Not set"}

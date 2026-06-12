@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
+import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
@@ -87,7 +88,7 @@ export function ChatWorkspace({
   const [activeId, setActiveId] = useState<string | null>(
     initialThreads.find((t) => t.category === "workspace")?.id ?? null
   );
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // New Chat dialog
   const [newChatOpen, setNewChatOpen] = useState(false);
@@ -384,8 +385,8 @@ export function ChatWorkspace({
     }
   }
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSend(e?: React.FormEvent) {
+    e?.preventDefault();
     if (!active || !draft.trim() || sending) return;
     setError(null);
     setSending(true);
@@ -736,7 +737,7 @@ export function ChatWorkspace({
   return (
     <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden md:h-[calc(100vh-53px)]">
       {/* Thread list */}
-      <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-80">
+      <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-[280px]">
         <div className="space-y-2.5 border-b border-border px-4 py-3.5">
           <div className="flex items-center justify-between">
             <div>
@@ -845,7 +846,7 @@ export function ChatWorkspace({
                             className={cn(
                               "text-[11px]",
                               thread.status === "active"
-                                ? "text-emerald-400"
+                                ? "text-emerald-600 dark:text-emerald-400"
                                 : "text-muted-foreground"
                             )}
                           >
@@ -983,7 +984,7 @@ export function ChatWorkspace({
                         className="ml-1"
                         onClick={() => resolveThread(active)}
                       >
-                        <CheckCircle2 className="size-4 text-emerald-400" /> Resolve
+                        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" /> Resolve
                       </Button>
                     )}
                   </>
@@ -1059,12 +1060,13 @@ export function ChatWorkspace({
                 </div>
               )}
 
-              <form onSubmit={handleSend} className="flex items-center gap-2">
-                <Slash className="size-4 shrink-0 text-muted-foreground" />
-                <Input
+              <form onSubmit={handleSend} className="flex items-end gap-2">
+                <Slash className="mb-2.5 size-4 shrink-0 text-muted-foreground" />
+                <ChatTextarea
                   ref={inputRef}
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
+                  onSend={handleSend}
                   placeholder={
                     active.status === "active"
                       ? "Message, or / for commands (/ticket, /meet, /canned)…"

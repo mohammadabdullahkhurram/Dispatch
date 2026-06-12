@@ -258,7 +258,7 @@ export function TasksView({
             className={cn(
               "text-xs",
               isOverdue(task.due_date) && task.status !== "done"
-                ? "font-medium text-red-400"
+                ? "font-medium text-red-600 dark:text-red-400"
                 : "text-muted-foreground"
             )}
           >
@@ -602,7 +602,7 @@ export function TasksView({
                       className={cn(
                         "text-sm",
                         isOverdue(t.due_date) && t.status !== "done"
-                          ? "font-medium text-red-400"
+                          ? "font-medium text-red-600 dark:text-red-400"
                           : "text-muted-foreground"
                       )}
                     >

@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DispatchLogo, DispatchMark } from "@/components/ui/dispatch-logo";
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Card,
   CardContent,
@@ -108,42 +109,30 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen flex-1">
-      {/* Left — brand panel */}
-      <div className="relative hidden flex-1 flex-col justify-between bg-sidebar p-12 lg:flex">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <span className="flex size-7 items-center justify-center rounded-md bg-primary">
-            <Zap className="size-4 text-primary-foreground" />
-          </span>
-          Internal Operations Platform
-        </div>
-
-        <div className="space-y-6">
-          <h1 className="text-6xl font-bold tracking-tight text-primary">
+      {/* Left — brand panel (always dark, CSS-only animated gradient) */}
+      <div className="login-gradient relative hidden flex-1 flex-col items-center justify-center p-12 lg:flex">
+        <div className="flex flex-col items-center gap-5 text-center">
+          <DispatchMark className="size-16" />
+          <span className="text-5xl font-semibold tracking-tight text-[#f8f8ff]">
             Dispatch
-          </h1>
-          <p className="max-w-md text-2xl font-medium leading-snug text-foreground">
+          </span>
+          <p className="max-w-sm text-lg leading-relaxed text-[#8888aa]">
             One platform. Every client. Zero chaos.
           </p>
         </div>
-
-        <p className="text-sm text-muted-foreground/70">
+        <p className="absolute bottom-10 text-sm text-[#55556a]">
           Bluejaypro · Digital Marketing Agency
         </p>
-
-        {/* subtle accent glow */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-32 top-1/3 size-96 rounded-full bg-primary/10 blur-3xl"
-        />
       </div>
 
       {/* Right — login / forgot password */}
-      <div className="flex flex-1 items-center justify-center bg-background p-6">
+      <div className="relative flex flex-1 items-center justify-center bg-background p-6">
+        <div className="absolute right-4 top-4">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-sm space-y-6">
-          <div className="space-y-1 text-center lg:hidden">
-            <h1 className="text-3xl font-bold tracking-tight text-primary">
-              Dispatch
-            </h1>
+          <div className="flex flex-col items-center gap-1 text-center lg:hidden">
+            <DispatchLogo variant="full" size="md" />
             <p className="text-sm text-muted-foreground">
               One platform. Every client. Zero chaos.
             </p>
@@ -238,7 +227,7 @@ export default function LoginPage() {
                     </p>
                   )}
                   {notice && (
-                    <p className="text-sm text-emerald-400" role="status">
+                    <p className="text-sm text-emerald-600 dark:text-emerald-400" role="status">
                       {notice}
                     </p>
                   )}

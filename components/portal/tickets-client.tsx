@@ -290,7 +290,7 @@ export function PortalTickets({
               </p>
             )}
             {formSuccess && (
-              <p className="text-sm text-emerald-400">
+              <p className="text-sm text-emerald-600 dark:text-emerald-400">
                 Ticket submitted — our team is on it.
               </p>
             )}
@@ -401,7 +401,7 @@ export function PortalTickets({
 
                 {selected.resolution_notes && (
                   <div className="space-y-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
-                    <p className="text-xs font-medium uppercase tracking-wider text-emerald-400">
+                    <p className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                       Resolution
                     </p>
                     <p className="text-sm">{selected.resolution_notes}</p>

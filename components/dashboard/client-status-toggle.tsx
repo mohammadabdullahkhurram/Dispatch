@@ -82,8 +82,8 @@ export function ClientStatusToggle({
         disabled={busy}
         className={
           status === "active"
-            ? "border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-400"
-            : "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-400"
+            ? "border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
+            : "border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-600 dark:text-emerald-400"
         }
       >
         <Power className="size-4" />

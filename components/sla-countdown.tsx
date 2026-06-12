@@ -32,9 +32,9 @@ export function SlaCountdown({
       className={cn(
         "inline-flex items-center gap-1 text-xs tabular-nums",
         breached
-          ? "font-semibold text-red-400"
+          ? "sla-breached font-semibold"
           : urgent
-            ? "text-orange-400"
+            ? "text-orange-600 dark:text-orange-400"
             : "text-muted-foreground"
       )}
     >

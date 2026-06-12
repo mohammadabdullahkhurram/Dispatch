@@ -226,7 +226,7 @@ export function AccountSettings({ profile }: { profile: UserProfile }) {
               <p
                 className={
                   infoMessage.ok
-                    ? "text-sm text-emerald-400"
+                    ? "text-sm text-emerald-600 dark:text-emerald-400"
                     : "text-sm text-destructive"
                 }
               >
@@ -295,7 +295,7 @@ export function AccountSettings({ profile }: { profile: UserProfile }) {
               <p
                 className={
                   passwordMessage.ok
-                    ? "text-sm text-emerald-400"
+                    ? "text-sm text-emerald-600 dark:text-emerald-400"
                     : "text-sm text-destructive"
                 }
               >

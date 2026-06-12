@@ -123,26 +123,55 @@ export default async function ClientProfilePage({
         <ArrowLeft className="size-4" /> All clients
       </Link>
 
-      <header className="flex flex-wrap items-center gap-4">
+      <header className="flex flex-wrap items-center gap-5 rounded-lg border border-border bg-card p-5">
         <UserAvatar
           name={client.company_name}
           avatarUrl={client.logo_url}
-          className="size-14 text-base"
+          className="size-16 text-lg"
         />
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
+        <div className="space-y-1.5">
+          <h1 className="text-3xl font-semibold tracking-tight">
             {client.company_name}
           </h1>
           <p className="text-sm text-muted-foreground">
             {client.contact_name} · {client.email}
             {client.phone ? ` · ${client.phone}` : ""}
           </p>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 pt-1 text-sm text-muted-foreground">
+            <span>
+              <span className="font-semibold text-foreground tabular-nums">
+                {ticketRows.filter((t) => t.status !== "resolved").length}
+              </span>{" "}
+              open tickets
+            </span>
+            <span>
+              <span className="font-semibold text-foreground tabular-nums">
+                {taskRows.filter((t) => t.status !== "done").length}
+              </span>{" "}
+              open tasks
+            </span>
+            <span>
+              <span className="font-semibold text-foreground tabular-nums">
+                {checklistRows.length
+                  ? Math.round((completed / checklistRows.length) * 100)
+                  : 0}
+                %
+              </span>{" "}
+              onboarded
+            </span>
+            <span>
+              <span className="font-semibold text-foreground tabular-nums">
+                {(clientUsers.data ?? []).length}
+              </span>{" "}
+              portal users
+            </span>
+          </div>
         </div>
         <div className="ml-auto flex items-center gap-3">
           {client.status === "inactive" && (
             <Badge
               variant="outline"
-              className="border-red-500/30 bg-red-500/10 text-red-400"
+              className="border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
             >
               Inactive
             </Badge>
@@ -179,7 +208,7 @@ export default async function ClientProfilePage({
       </header>
 
       <Tabs defaultValue="overview" className="flex-1">
-        <TabsList className="flex-wrap">
+        <TabsList variant="line" className="flex-wrap border-b border-border">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="team">Team</TabsTrigger>
           <TabsTrigger value="tickets">Tickets</TabsTrigger>
@@ -381,7 +410,7 @@ export default async function ClientProfilePage({
                     <span
                       className={
                         thread.status === "active"
-                          ? "text-xs font-medium text-emerald-400"
+                          ? "text-xs font-medium text-emerald-600 dark:text-emerald-400"
                           : "text-xs text-muted-foreground"
                       }
                     >

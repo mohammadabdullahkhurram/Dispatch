@@ -112,25 +112,23 @@ export function MessageBubble({
       body = <p className="whitespace-pre-wrap text-sm">{message.content}</p>;
   }
 
-  // Dispatch Bot system messages: muted card, bot icon, never "mine".
+  // Dispatch Bot system messages: centered, muted card, bot icon left.
   if (message.sender_type === "bot") {
     return (
-      <div className="flex gap-2.5">
-        <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
-          <Bot className="size-4 text-muted-foreground" />
-        </span>
-        <div className="max-w-[75%] space-y-1">
+      <div className="group flex justify-center">
+        <div className="flex max-w-[80%] flex-col items-center space-y-1">
           <div
             className={cn(
-              "inline-block rounded-2xl rounded-bl-sm text-left",
+              "flex items-start gap-2.5 rounded-2xl text-left",
               message.message_type === "ticket_card"
                 ? "bg-muted/40 p-2"
                 : "bg-muted/40 px-3.5 py-2.5 text-muted-foreground"
             )}
           >
+            <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
             {body}
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100">
             Dispatch Bot · {formatDateTime(message.sent_at)}
           </p>
         </div>
@@ -139,7 +137,7 @@ export function MessageBubble({
   }
 
   return (
-    <div className={cn("flex gap-2.5", mine ? "flex-row-reverse" : "flex-row")}>
+    <div className={cn("group flex gap-2.5", mine ? "flex-row-reverse" : "flex-row")}>
       <UserAvatar
         name={message.sender?.full_name ?? (message.sender_type === "team" ? "Team" : "Client")}
         avatarUrl={message.sender?.avatar_url}
@@ -153,12 +151,12 @@ export function MessageBubble({
               ? "bg-transparent p-0"
               : mine
                 ? "rounded-br-sm bg-primary text-primary-foreground"
-                : "rounded-bl-sm bg-secondary text-secondary-foreground"
+                : "rounded-bl-sm bg-surface-elevated text-secondary-foreground"
           )}
         >
           {body}
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[11px] text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100">
           {message.sender?.full_name ? `${message.sender.full_name} · ` : ""}
           {message.sender_type === "client" && clientCompany
             ? `${clientCompany} · `

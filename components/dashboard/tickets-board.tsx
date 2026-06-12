@@ -44,6 +44,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { SlaCountdown } from "@/components/sla-countdown";
 import { UserAvatar } from "@/components/user-avatar";
+import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit, logTicketActivity } from "@/lib/audit";
 import { formatDateTime, shortId, timeAgo } from "@/lib/format";
@@ -60,6 +61,13 @@ import type {
 
 const COLUMNS: TicketStatus[] = ["open", "in_progress", "escalated", "resolved"];
 const ALL = "all";
+
+const PRIORITY_BORDER: Record<Priority, string> = {
+  urgent: "border-l-red-500",
+  high: "border-l-orange-500",
+  medium: "border-l-yellow-500",
+  low: "border-l-slate-500",
+};
 
 type ClientOption = Pick<Client, "id" | "company_name" | "logo_url">;
 
@@ -484,7 +492,7 @@ export function TicketsBoard({
           return (
             <div key={status} className="flex min-h-48 flex-col rounded-xl bg-sidebar/60 p-3">
               <div className="mb-3 flex items-center justify-between px-1">
-                <span className="text-sm font-medium">{TICKET_STATUS_LABELS[status]}</span>
+                <span className="section-label">{TICKET_STATUS_LABELS[status]}</span>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">
                   {column.length}
                 </span>
@@ -497,7 +505,10 @@ export function TicketsBoard({
                     <button
                       key={t.id}
                       onClick={() => setSelected(t)}
-                      className="rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/50"
+                      className={cn(
+                        "cursor-grab rounded-lg border border-border border-l-[3px] bg-card p-3 text-left transition-colors hover:border-border-hover active:cursor-grabbing",
+                        PRIORITY_BORDER[t.priority]
+                      )}
                     >
                       <p className="text-xs text-muted-foreground">
                         {t.client?.company_name ?? "Internal"}
@@ -632,7 +643,7 @@ export function TicketsBoard({
                     <Button
                       variant="outline"
                       size="sm"
-                      className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+                      className="border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
                       onClick={() => changeStatus(selected, "escalated")}
                     >
                       <ArrowUpRight className="size-4" /> Escalate
@@ -666,7 +677,7 @@ export function TicketsBoard({
 
                 {selected.resolution_notes && (
                   <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
-                    <p className="text-xs font-medium uppercase tracking-wider text-emerald-400">
+                    <p className="text-xs font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
                       Resolution
                     </p>
                     <p className="mt-1 text-sm">{selected.resolution_notes}</p>

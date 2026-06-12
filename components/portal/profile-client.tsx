@@ -96,7 +96,10 @@ export function PortalProfile({
     setSaving(false);
   }
 
+  const [justCompleted, setJustCompleted] = useState<string | null>(null);
+
   async function toggleItem(item: ChecklistItem, completed: boolean) {
+    setJustCompleted(completed ? item.id : null);
     const supabase = createClient();
     const completedAt = completed ? new Date().toISOString() : null;
     const { error } = await supabase
@@ -161,7 +164,7 @@ export function PortalProfile({
       </header>
 
       <Tabs defaultValue={tab} className="flex-1">
-        <TabsList className="flex-wrap">
+        <TabsList variant="line" className="flex-wrap border-b border-border">
           {fullAccess && <TabsTrigger value="company">Company Info</TabsTrigger>}
           <TabsTrigger value="account">My Account</TabsTrigger>
           {fullAccess && (
@@ -236,7 +239,7 @@ export function PortalProfile({
                   <p
                     className={
                       saveMessage === "Saved."
-                        ? "text-sm text-emerald-400"
+                        ? "text-sm text-emerald-600 dark:text-emerald-400"
                         : "text-sm text-destructive"
                     }
                   >
@@ -278,6 +281,9 @@ export function PortalProfile({
                         onCheckedChange={(checked) =>
                           toggleItem(item, checked === true)
                         }
+                        className={
+                          justCompleted === item.id ? "animate-check-pop" : undefined
+                        }
                         aria-label={`Mark ${item.item_name} ${item.completed ? "incomplete" : "complete"}`}
                       />
                       <div className="min-w-0 flex-1">
@@ -290,7 +296,7 @@ export function PortalProfile({
                         >
                           {item.item_name}
                           {item.required && (
-                            <span className="ml-1.5 text-xs text-orange-400">
+                            <span className="ml-1.5 text-xs text-orange-600 dark:text-orange-400">
                               required
                             </span>
                           )}

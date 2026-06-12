@@ -70,7 +70,7 @@ export function DeleteClientButton({
         variant="outline"
         size="sm"
         onClick={() => setOpen(true)}
-        className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-400"
+        className="border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400"
       >
         <Trash2 className="size-4" /> Delete Client
       </Button>

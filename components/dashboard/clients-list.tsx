@@ -135,7 +135,7 @@ export function ClientsList({
                       {client.status === "inactive" && (
                         <Badge
                           variant="outline"
-                          className="border-red-500/30 bg-red-500/10 text-[10px] text-red-400"
+                          className="border-red-500/30 bg-red-500/10 text-[10px] text-red-600 dark:text-red-400"
                         >
                           Inactive
                         </Badge>

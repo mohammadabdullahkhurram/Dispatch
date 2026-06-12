@@ -1,5 +1,6 @@
 import { Sidebar, type NavItem } from "@/components/sidebar";
 import { NotificationBell } from "@/components/notification-bell";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getCurrentProfile } from "@/lib/data";
 import { ROLE_LABELS } from "@/lib/types";
 
@@ -44,7 +45,8 @@ export default async function DashboardLayout({
         }}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 hidden items-center justify-end border-b border-border bg-background/80 px-6 py-2.5 backdrop-blur md:flex">
+        <header className="sticky top-0 z-30 hidden h-14 items-center justify-end gap-1 border-b border-border bg-background/80 px-6 backdrop-blur md:flex">
+          <ThemeToggle />
           {profile && (
             <NotificationBell userId={profile.id} initialUnread={unread} />
           )}

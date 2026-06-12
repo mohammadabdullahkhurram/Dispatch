@@ -16,10 +16,10 @@ import {
   Settings,
   Ticket,
   UserCircle,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DispatchLogo } from "@/components/ui/dispatch-logo";
 import { createClient } from "@/lib/supabase/client";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
@@ -73,10 +73,8 @@ function NavLinks({
   onNavigate?: () => void;
 }) {
   return (
-    <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-      <p className="px-2 pb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {sectionLabel}
-      </p>
+    <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
+      <p className="section-label px-3 pb-2">{sectionLabel}</p>
       {items.map((item) => {
         const Icon = ICONS[item.icon];
         const active = isActive(pathname, item.href);
@@ -86,10 +84,10 @@ function NavLinks({
             href={item.href}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+              "flex items-center gap-3 rounded-md border-l-[3px] px-3 py-2 text-sm transition-colors",
               active
-                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground"
+                ? "border-primary bg-primary/10 font-medium text-sidebar-foreground"
+                : "border-transparent text-muted-foreground hover:bg-foreground/[0.04] hover:text-sidebar-foreground dark:hover:bg-white/[0.03]"
             )}
           >
             <Icon className={cn("size-4", active && "text-primary")} />
@@ -103,14 +101,10 @@ function NavLinks({
 
 function Brand() {
   return (
-    <div className="flex items-center gap-2.5 px-5 py-5">
-      <span className="flex size-8 items-center justify-center rounded-lg bg-primary">
-        <Zap className="size-4.5 text-primary-foreground" />
-      </span>
-      <div className="leading-tight">
-        <p className="text-sm font-semibold tracking-tight">Dispatch</p>
-        <p className="text-xs text-muted-foreground">Bluejaypro</p>
-      </div>
+    <div className="flex h-14 shrink-0 items-center border-b border-sidebar-border px-4">
+      <Link href="/" aria-label="Dispatch home">
+        <DispatchLogo variant="full" size="sm" />
+      </Link>
     </div>
   );
 }
@@ -188,7 +182,7 @@ export function Sidebar({
   return (
     <>
       {/* Desktop */}
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
+      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar md:flex">
         <Brand />
         <NavLinks items={items} sectionLabel={sectionLabel} pathname={pathname} />
         <UserFooter user={user} profileHref={profileHref} onSignOut={signOut} />
@@ -196,12 +190,7 @@ export function Sidebar({
 
       {/* Mobile top bar */}
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-sidebar-border bg-sidebar px-4 py-3 md:hidden">
-        <div className="flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-md bg-primary">
-            <Zap className="size-4 text-primary-foreground" />
-          </span>
-          <span className="text-sm font-semibold">Dispatch</span>
-        </div>
+        <DispatchLogo variant="full" size="sm" />
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger
             className="rounded-md p-2 text-muted-foreground hover:bg-sidebar-accent"

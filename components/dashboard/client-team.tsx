@@ -206,7 +206,7 @@ export function ClientTeam({
 
       {error && !open && <p className="text-sm text-destructive">{error}</p>}
       {warning && (
-        <p className="rounded-md border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-sm text-orange-400">
+        <p className="rounded-md border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-sm text-orange-600 dark:text-orange-400">
           {warning}
         </p>
       )}
@@ -245,7 +245,7 @@ export function ClientTeam({
                 {CLIENT_ROLE_LABELS[member.role]}
               </Badge>
               {member.user?.ghl_contact_id ? (
-                <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+                <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
                   GHL tagged
                 </Badge>
               ) : (

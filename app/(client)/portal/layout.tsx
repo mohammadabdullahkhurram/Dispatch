@@ -1,4 +1,5 @@
 import { Sidebar, type NavItem } from "@/components/sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { getClientContext, getCurrentProfile } from "@/lib/data";
 import { isClientAdminRole } from "@/lib/types";
 
@@ -62,7 +63,12 @@ export default async function PortalLayout({
           avatarUrl: profile?.avatar_url ?? null,
         }}
       />
-      <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-30 hidden h-14 items-center justify-end border-b border-border bg-background/80 px-6 backdrop-blur md:flex">
+          <ThemeToggle />
+        </header>
+        <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+      </div>
     </div>
   );
 }
