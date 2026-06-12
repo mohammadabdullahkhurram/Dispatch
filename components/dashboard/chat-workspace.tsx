@@ -79,11 +79,11 @@ export function ChatWorkspace({
 }) {
   const [threads, setThreads] = useState(initialThreads);
   const [threadView, setThreadView] = useState<"active" | "archived">("active");
-  const [chatScope, setChatScope] = useState<"clients" | "internal">("clients");
+  const [chatScope, setChatScope] = useState<"workspace" | "sessions" | "internal">(
+    "workspace"
+  );
   const [activeId, setActiveId] = useState<string | null>(
-    initialThreads.find(
-      (t) => t.status === "active" && t.category !== "internal"
-    )?.id ?? null
+    initialThreads.find((t) => t.category === "workspace")?.id ?? null
   );
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -91,6 +91,7 @@ export function ChatWorkspace({
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [sessionCategory, setSessionCategory] = useState("general");
   const [creatingChat, setCreatingChat] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Derived loading flag: true until messages for the active thread land.
@@ -107,18 +108,23 @@ export function ChatWorkspace({
   );
   const loadingMessages = !!activeId && loadedThreadId !== activeId;
 
-  // Scope (client vs internal) + status (active vs archived) filters.
+  // Workspace threads are permanent (no archive concept); sessions and
+  // internal threads split into active/archived.
   const visibleThreads = useMemo(
     () =>
-      threads.filter(
-        (t) =>
-          (chatScope === "internal"
-            ? t.category === "internal"
-            : t.category !== "internal") &&
-          (threadView === "active"
-            ? t.status === "active"
-            : t.status === "closed")
-      ),
+      threads.filter((t) => {
+        const scopeMatch =
+          chatScope === "workspace"
+            ? t.category === "workspace"
+            : chatScope === "internal"
+              ? t.category === "internal"
+              : t.category !== "workspace" && t.category !== "internal";
+        if (!scopeMatch) return false;
+        if (chatScope === "workspace") return true;
+        return threadView === "active"
+          ? t.status === "active"
+          : t.status === "closed";
+      }),
     [threads, threadView, chatScope]
   );
 
@@ -282,6 +288,9 @@ export function ChatWorkspace({
     messageType: MessageType,
     metadata: Record<string, unknown> | null
   ) {
+    // Only support sessions mirror to SMS — workspace and internal
+    // threads are web-only.
+    if (thread.category === "workspace" || thread.category === "internal") return;
     if (!content) return;
     if (messageType !== "text" && messageType !== "meet_link") return;
 
@@ -356,11 +365,29 @@ export function ChatWorkspace({
             details: { title, source: "chat" },
           }),
         ]);
-        await sendMessage(active, title, "ticket_card", {
-          ticket_id: ticket.id,
-          ticket_title: title,
-          ticket_status: "open",
-        });
+
+        if (active.category === "workspace") {
+          // Dispatch Bot announces it here via the DB trigger — no
+          // manual card, or we'd double-post.
+        } else {
+          await sendMessage(active, title, "ticket_card", {
+            ticket_id: ticket.id,
+            ticket_title: title,
+            ticket_status: "open",
+          });
+          // Sessions link to the ticket so they auto-close on resolve.
+          if (active.category !== "internal") {
+            await supabase
+              .from("chat_threads")
+              .update({ linked_ticket_id: ticket.id })
+              .eq("id", active.id);
+            setThreads((prev) =>
+              prev.map((t) =>
+                t.id === active.id ? { ...t, linked_ticket_id: ticket.id } : t
+              )
+            );
+          }
+        }
       }
     } else if (text.startsWith("/meet")) {
       const url = text.replace("/meet", "").trim() || "https://meet.google.com/new";
@@ -469,18 +496,17 @@ export function ChatWorkspace({
     setCreatingChat(false);
   }
 
-  /** Client: open their existing active thread, or create one. */
-  async function startClientChat() {
+  /** Workspace: open the client's persistent thread (create if missing). */
+  async function openWorkspaceChat() {
     if (!selectedClientId) return;
     setCreatingChat(true);
     setError(null);
 
     const existing = threads.find(
-      (t) => t.client_id === selectedClientId && t.status === "active"
+      (t) => t.client_id === selectedClientId && t.category === "workspace"
     );
     if (existing) {
-      setChatScope("clients");
-      setThreadView("active");
+      setChatScope("workspace");
       setActiveId(existing.id);
       setNewChatOpen(false);
       setCreatingChat(false);
@@ -493,7 +519,39 @@ export function ChatWorkspace({
       .insert({
         client_id: selectedClientId,
         status: "active",
-        category: "General",
+        category: "workspace",
+        created_by: currentUser.id,
+      })
+      .select("*, client:clients(id, company_name, contact_name, logo_url)")
+      .single();
+
+    if (createError || !thread) {
+      setError(createError?.message ?? "Failed to open the workspace chat.");
+      setCreatingChat(false);
+      return;
+    }
+
+    setThreads((prev) => [thread as ChatThread, ...prev]);
+    setChatScope("workspace");
+    setActiveId(thread.id);
+    setSelectedClientId("");
+    setNewChatOpen(false);
+    setCreatingChat(false);
+  }
+
+  /** Sessions: start a new issue-scoped session for a client. */
+  async function startSessionChat() {
+    if (!selectedClientId) return;
+    setCreatingChat(true);
+    setError(null);
+
+    const supabase = createClient();
+    const { data: thread, error: createError } = await supabase
+      .from("chat_threads")
+      .insert({
+        client_id: selectedClientId,
+        status: "active",
+        category: sessionCategory,
         created_by: currentUser.id,
         last_message_at: new Date().toISOString(),
       })
@@ -501,13 +559,13 @@ export function ChatWorkspace({
       .single();
 
     if (createError || !thread) {
-      setError(createError?.message ?? "Failed to open the chat.");
+      setError(createError?.message ?? "Failed to start the session.");
       setCreatingChat(false);
       return;
     }
 
     setThreads((prev) => [thread as ChatThread, ...prev]);
-    setChatScope("clients");
+    setChatScope("sessions");
     setThreadView("active");
     setActiveId(thread.id);
     setSelectedClientId("");
@@ -534,8 +592,9 @@ export function ChatWorkspace({
           <div className="flex rounded-md border border-border p-0.5">
             {(
               [
-                { key: "clients", label: "Client Chats" },
-                { key: "internal", label: "Internal Team" },
+                { key: "workspace", label: "Workspace" },
+                { key: "sessions", label: "Sessions" },
+                { key: "internal", label: "Internal" },
               ] as const
             ).map(({ key, label }) => (
               <button
@@ -552,22 +611,24 @@ export function ChatWorkspace({
               </button>
             ))}
           </div>
-          <div className="flex rounded-md border border-border p-0.5">
-            {(["active", "archived"] as const).map((view) => (
-              <button
-                key={view}
-                onClick={() => setThreadView(view)}
-                className={cn(
-                  "flex-1 rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors",
-                  threadView === view
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {view}
-              </button>
-            ))}
-          </div>
+          {chatScope !== "workspace" && (
+            <div className="flex rounded-md border border-border p-0.5">
+              {(["active", "archived"] as const).map((view) => (
+                <button
+                  key={view}
+                  onClick={() => setThreadView(view)}
+                  className={cn(
+                    "flex-1 rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors",
+                    threadView === view
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {view}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto">
           {visibleThreads.length === 0 ? (
@@ -603,21 +664,35 @@ export function ChatWorkspace({
                       </span>
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5">
-                      {thread.category && (
-                        <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-                          {thread.category}
-                        </Badge>
+                      {thread.category === "workspace" ? (
+                        <span className="text-[11px] text-muted-foreground">
+                          Workspace
+                        </span>
+                      ) : (
+                        <>
+                          {thread.category && thread.category !== "internal" && (
+                            <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+                              {thread.category}
+                            </Badge>
+                          )}
+                          {thread.linked_ticket_id && (
+                            <TicketIcon
+                              className="size-3 text-primary"
+                              aria-label="Linked ticket"
+                            />
+                          )}
+                          <span
+                            className={cn(
+                              "text-[11px]",
+                              thread.status === "active"
+                                ? "text-emerald-400"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {thread.status === "active" ? "Active" : "Closed"}
+                          </span>
+                        </>
                       )}
-                      <span
-                        className={cn(
-                          "text-[11px]",
-                          thread.status === "active"
-                            ? "text-emerald-400"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {thread.status === "active" ? "Active" : "Closed"}
-                      </span>
                       {unread > 0 && (
                         <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
                           {unread}
@@ -660,10 +735,11 @@ export function ChatWorkspace({
                         : (active.client?.company_name ?? "Unknown client")}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {active.category === "internal"
-                      ? "Internal team"
-                      : (active.category ?? "General")}{" "}
-                    · {active.status === "active" ? "Active" : "Closed"}
+                    {active.category === "workspace"
+                      ? "Workspace · Always active"
+                      : active.category === "internal"
+                        ? `Internal team · ${active.status === "active" ? "Active" : "Closed"}`
+                        : `${active.category ?? "general"} session · ${active.status === "active" ? "Active" : "Closed"}`}
                   </p>
                 </div>
               </div>
@@ -683,14 +759,16 @@ export function ChatWorkspace({
                         <Icon className="size-4 text-muted-foreground" />
                       </Button>
                     ))}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="ml-1"
-                      onClick={() => resolveThread(active)}
-                    >
-                      <CheckCircle2 className="size-4 text-emerald-400" /> Resolve
-                    </Button>
+                    {active.category !== "workspace" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-1"
+                        onClick={() => resolveThread(active)}
+                      >
+                        <CheckCircle2 className="size-4 text-emerald-400" /> Resolve
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
@@ -796,12 +874,18 @@ export function ChatWorkspace({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {chatScope === "internal" ? "New internal chat" : "New client chat"}
+              {chatScope === "internal"
+                ? "New internal chat"
+                : chatScope === "sessions"
+                  ? "New support session"
+                  : "Open workspace chat"}
             </DialogTitle>
             <DialogDescription>
               {chatScope === "internal"
                 ? "Pick teammates — reopens the existing thread if you've chatted before."
-                : "Pick a client — opens their active thread, or starts one."}
+                : chatScope === "sessions"
+                  ? "Starts a new issue-scoped session for a client."
+                  : "Every client has one persistent workspace chat."}
             </DialogDescription>
           </DialogHeader>
 
@@ -864,12 +948,32 @@ export function ChatWorkspace({
                   ))}
                 </SelectContent>
               </Select>
+              {chatScope === "sessions" && (
+                <Select value={sessionCategory} onValueChange={setSessionCategory}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["seo", "ghl", "software", "billing", "general"].map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c.toUpperCase()}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Button
                 className="w-full"
-                onClick={startClientChat}
+                onClick={
+                  chatScope === "sessions" ? startSessionChat : openWorkspaceChat
+                }
                 disabled={creatingChat || !selectedClientId}
               >
-                {creatingChat ? "Opening…" : "Open chat"}
+                {creatingChat
+                  ? "Opening…"
+                  : chatScope === "sessions"
+                    ? "Start session"
+                    : "Open workspace"}
               </Button>
             </div>
           )}

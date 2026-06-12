@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Ticket as TicketIcon, Video } from "lucide-react";
+import { Bot, Ticket as TicketIcon, Video } from "lucide-react";
 import { TicketStatusBadge } from "@/components/badges";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatDateTime } from "@/lib/format";
@@ -81,6 +81,32 @@ export function MessageBubble({
 
     default:
       body = <p className="whitespace-pre-wrap text-sm">{message.content}</p>;
+  }
+
+  // Dispatch Bot system messages: muted card, bot icon, never "mine".
+  if (message.sender_type === "bot") {
+    return (
+      <div className="flex gap-2.5">
+        <span className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted">
+          <Bot className="size-4 text-muted-foreground" />
+        </span>
+        <div className="max-w-[75%] space-y-1">
+          <div
+            className={cn(
+              "inline-block rounded-2xl rounded-bl-sm text-left",
+              message.message_type === "ticket_card"
+                ? "bg-muted/40 p-2"
+                : "bg-muted/40 px-3.5 py-2.5 text-muted-foreground"
+            )}
+          >
+            {body}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Dispatch Bot · {formatDateTime(message.sent_at)}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

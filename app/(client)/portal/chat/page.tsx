@@ -24,14 +24,24 @@ export default async function PortalChatPage() {
     );
   }
 
-  const { data: thread } = await supabase
+  // The portal chats in the persistent workspace thread.
+  let { data: thread } = await supabase
     .from("chat_threads")
     .select("*")
     .eq("client_id", client.id)
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
+    .eq("category", "workspace")
+    .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
+
+  if (!thread) {
+    const { data: created } = await supabase
+      .from("chat_threads")
+      .insert({ client_id: client.id, status: "active", category: "workspace" })
+      .select("*")
+      .single();
+    thread = created;
+  }
 
   let messages: ChatMessage[] = [];
   if (thread) {
@@ -46,8 +56,7 @@ export default async function PortalChatPage() {
   return (
     <PortalChat
       userId={profile.id}
-      clientId={client.id}
-      initialThread={(thread as ChatThread) ?? null}
+      thread={thread as ChatThread}
       initialMessages={messages}
     />
   );

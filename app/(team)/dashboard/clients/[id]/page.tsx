@@ -37,6 +37,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { ClientTeam } from "@/components/dashboard/client-team";
 import { ClientStatusToggle } from "@/components/dashboard/client-status-toggle";
 import { DeleteClientButton } from "@/components/dashboard/delete-client-button";
+import { DeleteWorkspaceChatButton } from "@/components/dashboard/delete-workspace-chat-button";
 import { getCurrentProfile } from "@/lib/data";
 import { formatDate, formatDateTime, shortId } from "@/lib/format";
 import { isAgencyManagerRole } from "@/lib/types";
@@ -157,11 +158,18 @@ export default async function ClientProfilePage({
           {profile &&
             (profile.role === "agency_owner" ||
               profile.role === "agency_admin") && (
-              <DeleteClientButton
-                clientId={client.id}
-                companyName={client.company_name}
-                currentUserId={profile.id}
-              />
+              <>
+                <DeleteWorkspaceChatButton
+                  clientId={client.id}
+                  companyName={client.company_name}
+                  currentUserId={profile.id}
+                />
+                <DeleteClientButton
+                  clientId={client.id}
+                  companyName={client.company_name}
+                  currentUserId={profile.id}
+                />
+              </>
             )}
         </div>
       </header>
@@ -357,7 +365,9 @@ export default async function ClientProfilePage({
                     <MessageSquare className="size-5 text-primary" />
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium">
-                        {thread.category ?? "General"} conversation
+                        {thread.category === "workspace"
+                          ? "Workspace chat"
+                          : `${thread.category ?? "general"} session`}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Opened {formatDate(thread.created_at)} · last message{" "}

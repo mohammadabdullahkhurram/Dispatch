@@ -65,12 +65,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, matched: false });
   }
 
-  // Find the client's active thread, or open one for this SMS conversation.
+  // SMS goes to a support SESSION, never the workspace thread.
+  // Reuse the client's active session or open a new one.
   let { data: thread } = await supabase
     .from("chat_threads")
     .select("id")
     .eq("client_id", client.id)
     .eq("status", "active")
+    .not("category", "in", '("workspace","internal")')
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -81,16 +83,16 @@ export async function POST(request: NextRequest) {
       .insert({
         client_id: client.id,
         status: "active",
-        category: "General",
+        category: "general",
         last_message_at: new Date().toISOString(),
       })
       .select("id")
       .single();
 
     if (threadError || !newThread) {
-      console.error("[ghl-sms] Thread create failed:", threadError?.message);
+      console.error("[ghl-sms] Session create failed:", threadError?.message);
       return NextResponse.json(
-        { error: "Failed to open chat thread" },
+        { error: "Failed to open chat session" },
         { status: 500 }
       );
     }

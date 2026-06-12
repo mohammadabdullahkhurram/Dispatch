@@ -14,7 +14,7 @@ export type TaskStatus = "todo" | "in_progress" | "done";
 export type OnboardingStatus = "not_started" | "in_progress" | "completed";
 export type ClientStatus = "active" | "inactive";
 export type ThreadStatus = "active" | "closed";
-export type SenderType = "client" | "team";
+export type SenderType = "client" | "team" | "bot";
 export type MessageType = "text" | "ticket_card" | "recording" | "meet_link";
 
 export const TEAM_ROLES: UserRole[] = [
@@ -205,10 +205,11 @@ export interface ChatThread {
   id: string;
   client_id: string | null; // null for internal team threads
   status: ThreadStatus;
-  category: string | null; // "internal" for team threads
+  category: string | null; // "workspace", "internal", or an issue category
   title: string | null;
   participant_ids: string[] | null;
   created_by: string | null;
+  linked_ticket_id: string | null;
   last_message_at: string | null;
   created_at: string;
   client?: Pick<

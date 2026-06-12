@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { MessageSquareX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,11 +16,10 @@ import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
 
 /**
- * Permanently deletes a client. FKs cascade: tickets, chat threads +
- * messages, checklist items, documents, and roster links all go with
- * it (tasks keep their rows but lose the client reference).
+ * Wipes the client's workspace chat (thread + all messages). A fresh
+ * workspace is recreated automatically on the next bot post or visit.
  */
-export function DeleteClientButton({
+export function DeleteWorkspaceChatButton({
   clientId,
   companyName,
   currentUserId,
@@ -40,19 +39,19 @@ export function DeleteClientButton({
     setError(null);
     const supabase = createClient();
 
-    // Audit first — after the delete there's no row to reference.
     await logAudit(supabase, {
       userId: currentUserId,
-      entityType: "client",
+      entityType: "chat_thread",
       entityId: clientId,
-      action: "client_deleted",
+      action: "workspace_chat_deleted",
       details: { company_name: companyName },
     });
 
     const { error: deleteError } = await supabase
-      .from("clients")
+      .from("chat_threads")
       .delete()
-      .eq("id", clientId);
+      .eq("client_id", clientId)
+      .eq("category", "workspace");
 
     if (deleteError) {
       setError(deleteError.message);
@@ -60,7 +59,9 @@ export function DeleteClientButton({
       return;
     }
 
-    router.push("/dashboard/clients");
+    setOpen(false);
+    setConfirmText("");
+    setDeleting(false);
     router.refresh();
   }
 
@@ -72,18 +73,17 @@ export function DeleteClientButton({
         onClick={() => setOpen(true)}
         className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-400"
       >
-        <Trash2 className="size-4" /> Delete Client
+        <MessageSquareX className="size-4" /> Delete Workspace Chat
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete {companyName}?</DialogTitle>
+            <DialogTitle>Delete {companyName}&apos;s workspace chat?</DialogTitle>
             <DialogDescription>
-              This is permanent. All of this client&apos;s tickets, their
-              workspace chat and session history, checklist items, documents,
-              and portal user links will be deleted with them. There is no
-              undo.
+              The entire conversation history — including Dispatch Bot ticket
+              updates — will be permanently deleted. A fresh, empty workspace
+              chat will be created automatically. There is no undo.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -112,7 +112,7 @@ export function DeleteClientButton({
                 disabled={deleting || confirmText !== "Delete"}
                 onClick={handleDelete}
               >
-                {deleting ? "Deleting…" : "Delete permanently"}
+                {deleting ? "Deleting…" : "Delete chat"}
               </Button>
             </div>
           </div>

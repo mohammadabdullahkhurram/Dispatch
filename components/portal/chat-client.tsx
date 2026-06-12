@@ -4,43 +4,32 @@ import { useEffect, useRef, useState } from "react";
 import { MessageSquare, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { EmptyState } from "@/components/empty-state";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { createClient } from "@/lib/supabase/client";
-import { logAudit } from "@/lib/audit";
 import type { ChatMessage, ChatThread } from "@/lib/types";
 
-const CATEGORIES = ["SEO", "GHL", "Software", "Billing", "General"];
-
+/**
+ * The client's persistent workspace chat with the Bluejaypro team.
+ * Web-only; Dispatch Bot posts their ticket updates here.
+ */
 export function PortalChat({
   userId,
-  clientId,
-  initialThread,
+  thread,
   initialMessages,
 }: {
   userId: string;
-  clientId: string;
-  initialThread: ChatThread | null;
+  thread: ChatThread;
   initialMessages: ChatMessage[];
 }) {
-  const [thread, setThread] = useState(initialThread);
   const [messages, setMessages] = useState(initialMessages);
   const [draft, setDraft] = useState("");
-  const [category, setCategory] = useState("General");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Realtime: append messages from the team as they arrive.
+  // Realtime: team replies and Dispatch Bot ticket updates.
   useEffect(() => {
-    if (!thread) return;
     const supabase = createClient();
     const channel = supabase
       .channel(`portal-chat-${thread.id}`)
@@ -72,7 +61,7 @@ export function PortalChat({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [thread]);
+  }, [thread.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -85,41 +74,10 @@ export function PortalChat({
     setSending(true);
 
     const supabase = createClient();
-    let activeThread = thread;
-
-    // First message opens the thread with the chosen category.
-    if (!activeThread) {
-      const { data: newThread, error: threadError } = await supabase
-        .from("chat_threads")
-        .insert({
-          client_id: clientId,
-          status: "active",
-          category,
-          last_message_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
-
-      if (threadError || !newThread) {
-        setError(threadError?.message ?? "Could not start the conversation.");
-        setSending(false);
-        return;
-      }
-      activeThread = newThread as ChatThread;
-      setThread(activeThread);
-      await logAudit(supabase, {
-        userId,
-        entityType: "chat_thread",
-        entityId: activeThread.id,
-        action: "thread_opened",
-        details: { category },
-      });
-    }
-
     const { data: message, error: messageError } = await supabase
       .from("chat_messages")
       .insert({
-        thread_id: activeThread.id,
+        thread_id: thread.id,
         sender_id: userId,
         sender_type: "client",
         content: draft.trim(),
@@ -137,7 +95,7 @@ export function PortalChat({
     await supabase
       .from("chat_threads")
       .update({ last_message_at: new Date().toISOString() })
-      .eq("id", activeThread.id);
+      .eq("id", thread.id);
 
     setMessages((prev) =>
       prev.some((m) => m.id === message.id)
@@ -150,31 +108,12 @@ export function PortalChat({
 
   return (
     <div className="flex h-[calc(100vh-57px)] flex-1 flex-col md:h-screen">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Chat Support</h1>
-          <p className="text-xs text-muted-foreground">
-            {thread
-              ? `${thread.category ?? "General"} · Active conversation`
-              : "Start a conversation with your Bluejaypro team"}
-          </p>
-        </div>
-        {!thread && (
-          <div className="w-40">
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
-                <SelectValue placeholder="Category" />
-              </SelectTrigger>
-              <SelectContent>
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+      <header className="border-b border-border px-6 py-4">
+        <h1 className="text-lg font-semibold tracking-tight">Chat Support</h1>
+        <p className="text-xs text-muted-foreground">
+          Your ongoing conversation with the Bluejaypro team — ticket updates
+          appear here automatically.
+        </p>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
@@ -182,11 +121,7 @@ export function PortalChat({
           <EmptyState
             icon={MessageSquare}
             title="No messages yet"
-            description={
-              thread
-                ? "Say hello — your team will reply right here."
-                : "Pick a category and send your first message to open a thread."
-            }
+            description="Say hello — your team will reply right here."
           />
         ) : (
           messages.map((m) => (
@@ -208,9 +143,7 @@ export function PortalChat({
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={
-            thread ? "Type a message…" : `Start a ${category} conversation…`
-          }
+          placeholder="Type a message…"
           aria-label="Message"
         />
         <Button type="submit" size="icon" disabled={sending || !draft.trim()}>

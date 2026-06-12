@@ -114,9 +114,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Post-creation side effects are best-effort — the ticket is the
-  // source of truth and is already saved.
+  // Each call opens a fresh support session linked to its ticket, so
+  // the session auto-closes when the ticket resolves. The workspace
+  // announcement comes from the Dispatch Bot DB trigger.
   await Promise.all([
+    supabase.from("chat_threads").insert({
+      client_id: client.id,
+      status: "active",
+      category,
+      linked_ticket_id: ticket.id,
+      last_message_at: new Date().toISOString(),
+    }),
     supabase.from("ticket_activity_log").insert({
       ticket_id: ticket.id,
       user_id: null,
@@ -136,7 +144,6 @@ export async function POST(request: NextRequest) {
         duration: payload.duration ?? null,
       },
     }),
-    postTicketCard(supabase, client.id, ticket.id, title),
     notifyDepartmentHead(supabase, matchedDepartment?.id ?? null, {
       ticketId: ticket.id,
       title,
@@ -146,56 +153,6 @@ export async function POST(request: NextRequest) {
   ]);
 
   return NextResponse.json({ received: true, ticket_id: ticket.id });
-}
-
-/** Drop a ticket_card message into the client's active chat thread. */
-async function postTicketCard(
-  supabase: ReturnType<typeof createAdminClient>,
-  clientId: string,
-  ticketId: string,
-  title: string
-) {
-  let { data: thread } = await supabase
-    .from("chat_threads")
-    .select("id")
-    .eq("client_id", clientId)
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!thread) {
-    const { data: newThread } = await supabase
-      .from("chat_threads")
-      .insert({
-        client_id: clientId,
-        status: "active",
-        category: "General",
-        last_message_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    thread = newThread;
-  }
-  if (!thread) return;
-
-  await supabase.from("chat_messages").insert({
-    thread_id: thread.id,
-    sender_id: null,
-    sender_type: "team",
-    content: title,
-    message_type: "ticket_card",
-    metadata: {
-      ticket_id: ticketId,
-      ticket_title: title,
-      ticket_status: "open",
-      source: "phone",
-    },
-  });
-  await supabase
-    .from("chat_threads")
-    .update({ last_message_at: new Date().toISOString() })
-    .eq("id", thread.id);
 }
 
 /** Notify the head of the client's assigned department. */

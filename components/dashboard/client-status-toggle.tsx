@@ -45,15 +45,19 @@ export function ClientStatusToggle({
       return;
     }
 
-    // Threads follow the client: closed when inactive, reopened on
-    // reactivation.
-    const { error: threadError } = await supabase
-      .from("chat_threads")
-      .update({ status: nextStatus === "inactive" ? "closed" : "active" })
-      .eq("client_id", clientId);
+    // Deactivating closes open support sessions. The workspace thread
+    // never archives, and reactivation doesn't reopen old sessions —
+    // new ones spawn on the next contact.
+    if (nextStatus === "inactive") {
+      const { error: threadError } = await supabase
+        .from("chat_threads")
+        .update({ status: "closed" })
+        .eq("client_id", clientId)
+        .neq("category", "workspace");
 
-    if (threadError) {
-      setError(`Client updated, but threads failed: ${threadError.message}`);
+      if (threadError) {
+        setError(`Client updated, but sessions failed: ${threadError.message}`);
+      }
     }
 
     await logAudit(supabase, {
