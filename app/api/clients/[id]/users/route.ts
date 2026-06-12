@@ -78,11 +78,13 @@ export async function POST(
   const body = (await request.json().catch(() => null)) as {
     email?: string;
     full_name?: string;
+    phone?: string;
     role?: ClientUserRole;
   } | null;
 
   const email = body?.email?.trim().toLowerCase();
   const fullName = body?.full_name?.trim();
+  const phone = body?.phone?.trim() || null;
   const role: ClientUserRole = VALID_ROLES.includes(body?.role as ClientUserRole)
     ? (body!.role as ClientUserRole)
     : "office_member";
@@ -115,7 +117,6 @@ export async function POST(
 
   if (existingUser) {
     userId = existingUser.id;
-    await admin.from("users").update({ full_name: fullName }).eq("id", userId);
   } else {
     const { data: created, error: createError } =
       await admin.auth.admin.createUser({
@@ -132,6 +133,12 @@ export async function POST(
     }
     userId = created.user.id;
   }
+
+  // Name + phone on the profile — phone powers SMS sender matching.
+  await admin
+    .from("users")
+    .update({ full_name: fullName, phone })
+    .eq("id", userId);
 
   // Link the user to the client.
   const { data: membership, error: linkError } = await admin

@@ -17,10 +17,13 @@ export function MessageBubble({
   message,
   viewer,
   ticketHrefBase,
+  clientCompany,
 }: {
   message: ChatMessage;
   viewer: "client" | "team";
   ticketHrefBase: string;
+  /** Shown after the sender name on client messages: "Jane · Acme Co." */
+  clientCompany?: string;
 }) {
   const mine = message.sender_type === viewer;
   const meta = (message.metadata ?? {}) as {
@@ -102,6 +105,9 @@ export function MessageBubble({
         </div>
         <p className="text-[11px] text-muted-foreground">
           {message.sender?.full_name ? `${message.sender.full_name} · ` : ""}
+          {message.sender_type === "client" && clientCompany
+            ? `${clientCompany} · `
+            : ""}
           {formatDateTime(message.sent_at)}
         </p>
       </div>

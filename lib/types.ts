@@ -208,7 +208,10 @@ export interface ChatThread {
   category: string | null;
   last_message_at: string | null;
   created_at: string;
-  client?: Pick<Client, "id" | "company_name" | "logo_url"> | null;
+  client?: Pick<
+    Client,
+    "id" | "company_name" | "contact_name" | "logo_url"
+  > | null;
 }
 
 export interface ChatMessage {

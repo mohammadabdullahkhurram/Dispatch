@@ -50,6 +50,7 @@ export function ClientTeam({
   const [draft, setDraft] = useState({
     email: "",
     full_name: "",
+    phone: "",
     role: "office_member" as ClientUserRole,
   });
   const [saving, setSaving] = useState(false);
@@ -82,7 +83,7 @@ export function ClientTeam({
 
     setMembers((prev) => [...prev, data.member!]);
     if (data.warning) setWarning(data.warning);
-    setDraft({ email: "", full_name: "", role: "office_member" });
+    setDraft({ email: "", full_name: "", phone: "", role: "office_member" });
     setOpen(false);
     setSaving(false);
   }
@@ -156,6 +157,19 @@ export function ClientTeam({
                   onChange={(e) => setDraft({ ...draft, email: e.target.value })}
                   placeholder="jane@client.com"
                 />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="cu-phone">Phone</Label>
+                <Input
+                  id="cu-phone"
+                  type="tel"
+                  value={draft.phone}
+                  onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+                  placeholder="+1 555 123 4567"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used to match their inbound SMS to this person in chat.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Role</Label>

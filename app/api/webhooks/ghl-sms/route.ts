@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findClientByPhone } from "@/lib/phone";
+import { findClientByPhone, phonesMatch } from "@/lib/phone";
 import {
   DISPATCH_TAG,
   getContactTags,
@@ -97,9 +97,27 @@ export async function POST(request: NextRequest) {
     thread = newThread;
   }
 
+  // Attribute the SMS to the specific person on the client's roster
+  // whose phone matches, so chat shows who actually texted.
+  const { data: roster } = await supabase
+    .from("client_users")
+    .select("user:users(id, phone)")
+    .eq("client_id", client.id);
+
+  const senderId =
+    (roster ?? [])
+      .map((row) => {
+        const rel = row.user as unknown;
+        return (Array.isArray(rel) ? rel[0] : rel) as {
+          id: string;
+          phone: string | null;
+        } | null;
+      })
+      .find((u) => u && phonesMatch(u.phone, payload.phone!))?.id ?? null;
+
   const { error: messageError } = await supabase.from("chat_messages").insert({
     thread_id: thread.id,
-    sender_id: null, // SMS sender has no Dispatch user session
+    sender_id: senderId,
     sender_type: "client",
     content: payload.message,
     message_type: "text",

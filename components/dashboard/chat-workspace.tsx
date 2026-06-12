@@ -73,6 +73,15 @@ export function ChatWorkspace({
     [threads, threadView]
   );
 
+  // Header contact: the most recent client sender we can name, falling
+  // back to the client's primary contact.
+  const activeContactName = useMemo(() => {
+    const lastNamedSender = [...messages]
+      .reverse()
+      .find((m) => m.sender_type === "client" && m.sender?.full_name);
+    return lastNamedSender?.sender?.full_name ?? active?.client?.contact_name ?? null;
+  }, [messages, active]);
+
   const showSlashMenu = draft.startsWith("/") && !draft.includes(" ");
   const matchingCommands = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(draft.toLowerCase()));
   const showCannedPicker = draft.toLowerCase().startsWith("/canned");
@@ -452,7 +461,9 @@ export function ChatWorkspace({
                 />
                 <div>
                   <p className="text-sm font-semibold">
-                    {active.client?.company_name ?? "Unknown client"}
+                    {activeContactName
+                      ? `${activeContactName} · ${active.client?.company_name ?? "Unknown client"}`
+                      : (active.client?.company_name ?? "Unknown client")}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {active.category ?? "General"} ·{" "}
@@ -483,6 +494,7 @@ export function ChatWorkspace({
                     message={m}
                     viewer="team"
                     ticketHrefBase="/dashboard/tickets"
+                    clientCompany={active.client?.company_name}
                   />
                 ))
               )}
