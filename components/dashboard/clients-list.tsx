@@ -16,16 +16,21 @@ import {
 import { OnboardingBadge } from "@/components/badges";
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
+import { NewClientDialog } from "@/components/dashboard/new-client-dialog";
 import type { Client, Department } from "@/lib/types";
 
 export function ClientsList({
   clients,
   departments,
   openTicketCounts,
+  currentUserId,
+  canCreate,
 }: {
   clients: Client[];
   departments: Department[];
   openTicketCounts: Record<string, number>;
+  currentUserId: string | null;
+  canCreate: boolean;
 }) {
   const [query, setQuery] = useState("");
 
@@ -54,14 +59,22 @@ export function ClientsList({
             {clients.length} client{clients.length === 1 ? "" : "s"} on the books.
           </p>
         </div>
-        <div className="relative w-72 max-w-full">
-          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search company, contact, email…"
-            className="pl-8"
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-72 max-w-full">
+            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search company, contact, email…"
+              className="pl-8"
+            />
+          </div>
+          {canCreate && currentUserId && (
+            <NewClientDialog
+              currentUserId={currentUserId}
+              departments={departments}
+            />
+          )}
         </div>
       </header>
 

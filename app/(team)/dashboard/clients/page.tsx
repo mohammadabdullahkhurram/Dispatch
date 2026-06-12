@@ -1,11 +1,19 @@
-import { createClient } from "@/lib/supabase/server";
 import { ClientsList } from "@/components/dashboard/clients-list";
-import type { Client, Department } from "@/lib/types";
+import { getCurrentProfile } from "@/lib/data";
+import type { Client, Department, UserRole } from "@/lib/types";
 
 export const metadata = { title: "Clients" };
 
+// Roles allowed to create clients.
+const CREATOR_ROLES: UserRole[] = [
+  "agency_owner",
+  "agency_admin",
+  "agency_manager",
+  "department_head",
+];
+
 export default async function ClientsPage() {
-  const supabase = await createClient();
+  const { supabase, profile } = await getCurrentProfile();
 
   const [clients, departments, openTickets] = await Promise.all([
     supabase.from("clients").select("*").order("company_name"),
@@ -25,6 +33,8 @@ export default async function ClientsPage() {
       clients={(clients.data ?? []) as Client[]}
       departments={(departments.data ?? []) as Department[]}
       openTicketCounts={openCounts}
+      currentUserId={profile?.id ?? null}
+      canCreate={!!profile && CREATOR_ROLES.includes(profile.role)}
     />
   );
 }
