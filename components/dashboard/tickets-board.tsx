@@ -46,6 +46,7 @@ import { SlaCountdown } from "@/components/sla-countdown";
 import { UserAvatar } from "@/components/user-avatar";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { slaDeadline } from "@/lib/sla";
 import { logAudit, logTicketActivity } from "@/lib/audit";
 import { formatDateTime, shortId, timeAgo } from "@/lib/format";
 import type {
@@ -266,6 +267,7 @@ export function TicketsBoard({
         assigned_to: draft.assigned_to || null,
         created_by: currentUser.id,
         source: "internal",
+        sla_deadline: slaDeadline(draft.priority),
       })
       .select(
         `*,

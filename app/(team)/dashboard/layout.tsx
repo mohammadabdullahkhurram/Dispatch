@@ -23,6 +23,14 @@ export default async function DashboardLayout({
 
   let unread = 0;
   if (profile) {
+    // Backstop for the cron: sweep time-based notifications (SLA
+    // breach, task due/overdue) on dashboard loads too. Deduped in
+    // the DB, so frequent calls are harmless.
+    await supabase.rpc("run_time_based_notifications").then(
+      () => {},
+      () => {}
+    );
+
     const { count } = await supabase
       .from("notifications")
       .select("id", { count: "exact", head: true })

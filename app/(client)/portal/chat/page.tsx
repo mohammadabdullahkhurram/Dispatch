@@ -53,11 +53,37 @@ export default async function PortalChatPage() {
     messages = (data ?? []) as ChatMessage[];
   }
 
+  // Direct messages this user is a participant of (RLS hides the rest).
+  const { data: dmThreads } = await supabase
+    .from("chat_threads")
+    .select("*")
+    .eq("category", "dm")
+    .contains("participant_ids", [profile.id])
+    .order("last_message_at", { ascending: false, nullsFirst: false });
+
+  // Resolve the team member on the other side of each DM for labels.
+  const dms = (dmThreads ?? []) as ChatThread[];
+  const otherIds = [
+    ...new Set(
+      dms
+        .flatMap((t) => t.participant_ids ?? [])
+        .filter((uid) => uid !== profile.id)
+    ),
+  ];
+  const { data: others } = otherIds.length
+    ? await supabase
+        .from("users")
+        .select("id, full_name, avatar_url")
+        .in("id", otherIds)
+    : { data: [] };
+
   return (
     <PortalChat
       userId={profile.id}
       thread={thread as ChatThread}
       initialMessages={messages}
+      dmThreads={dms}
+      dmContacts={others ?? []}
     />
   );
 }

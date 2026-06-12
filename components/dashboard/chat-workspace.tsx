@@ -35,6 +35,7 @@ import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
+import { slaDeadline } from "@/lib/sla";
 import { logAudit, logTicketActivity } from "@/lib/audit";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -445,9 +446,11 @@ export function ChatWorkspace({
         title,
         description: `Created from chat thread with ${active.client?.company_name ?? "client"}.`,
         category,
+        priority: "medium",
         client_id: active.client_id,
         created_by: currentUser.id,
         source: "chat",
+        sla_deadline: slaDeadline("medium"),
       })
       .select()
       .single();

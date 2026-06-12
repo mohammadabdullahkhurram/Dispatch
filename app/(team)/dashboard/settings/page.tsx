@@ -20,9 +20,9 @@ export default async function SettingsPage() {
     supabase.from("canned_responses").select("*").order("title"),
     supabase
       .from("audit_logs")
-      .select("*, user:users(id, full_name, avatar_url)")
+      .select("*, user:users(id, full_name, avatar_url)", { count: "exact" })
       .order("created_at", { ascending: false })
-      .limit(100),
+      .range(0, 49),
   ]);
 
   return (
@@ -33,6 +33,7 @@ export default async function SettingsPage() {
       initialDepartments={(departments.data ?? []) as Department[]}
       initialCanned={(canned.data ?? []) as CannedResponse[]}
       auditLogs={(auditLogs.data ?? []) as AuditLog[]}
+      auditTotal={auditLogs.count ?? 0}
       ghlStatus={{
         apiKey: !!process.env.GHL_API_KEY,
         locationId: !!process.env.GHL_LOCATION_ID,

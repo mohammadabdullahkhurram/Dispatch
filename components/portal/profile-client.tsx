@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { AccountSettings } from "@/components/account-settings";
+import { BrandKitEditor } from "@/components/brand-kit-editor";
 import { ClientTeam } from "@/components/dashboard/client-team";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
@@ -463,54 +464,12 @@ export function PortalProfile({
                 </label>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Colors
-                </p>
-                {Object.keys(brandColors).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No brand colors on file yet.
-                  </p>
-                ) : (
-                  <div className="flex flex-wrap gap-3">
-                    {Object.entries(brandColors).map(([name, hex]) => (
-                      <div key={name} className="text-center">
-                        <span
-                          className="block size-12 rounded-lg border border-border"
-                          style={{ backgroundColor: String(hex) }}
-                          title={String(hex)}
-                        />
-                        <p className="mt-1 text-xs capitalize">{name}</p>
-                        <p className="font-mono text-[10px] text-muted-foreground">
-                          {String(hex)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Fonts
-                </p>
-                {Object.keys(brandFonts).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No brand fonts on file yet.
-                  </p>
-                ) : (
-                  <ul className="space-y-1">
-                    {Object.entries(brandFonts).map(([usage, font]) => (
-                      <li key={usage} className="text-sm">
-                        <span className="capitalize text-muted-foreground">
-                          {usage}:
-                        </span>{" "}
-                        <span className="font-medium">{String(font)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              <BrandKitEditor
+                clientId={client.id}
+                userId={userId}
+                initialColors={brandColors}
+                initialFonts={brandFonts}
+              />
             </CardContent>
           </Card>
         </TabsContent>

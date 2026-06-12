@@ -8,6 +8,7 @@ import { isClientAdminRole } from "@/lib/types";
 const FULL_NAV: NavItem[] = [
   { href: "/portal", label: "Overview", icon: "dashboard" },
   { href: "/portal/tickets", label: "My Tickets", icon: "tickets" },
+  { href: "/portal/tasks", label: "Tasks", icon: "tasks" },
   { href: "/portal/chat", label: "Chat Support", icon: "chat" },
   { href: "/portal/profile?tab=checklist", label: "My Checklist", icon: "checklist" },
   { href: "/portal/profile?tab=documents", label: "Documents", icon: "documents" },
@@ -17,6 +18,7 @@ const FULL_NAV: NavItem[] = [
 const LIMITED_NAV: NavItem[] = [
   { href: "/portal", label: "Overview", icon: "dashboard" },
   { href: "/portal/tickets", label: "My Tickets", icon: "tickets" },
+  { href: "/portal/tasks", label: "Tasks", icon: "tasks" },
   { href: "/portal/chat", label: "Chat Support", icon: "chat" },
 ];
 

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findClientByPhone, phonesMatch } from "@/lib/phone";
+import { slaDeadline } from "@/lib/sla";
 import { formatDuration } from "@/lib/format";
 import type { Priority, TicketCategory } from "@/lib/types";
 
@@ -23,13 +24,6 @@ const IVR_CATEGORIES: Record<string, TicketCategory> = {
   "5": "general",
 };
 
-// Same priority→SLA mapping the web portal uses.
-const SLA_HOURS: Record<Priority, number> = {
-  urgent: 4,
-  high: 8,
-  medium: 24,
-  low: 48,
-};
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as {
@@ -73,10 +67,6 @@ export async function POST(request: NextRequest) {
 
   const title = `Phone call from ${client.company_name} (${category.toUpperCase()})`;
 
-  const slaDeadline = new Date(
-    Date.now() + SLA_HOURS[priority] * 3600_000
-  ).toISOString();
-
   // Tickets route to departments per issue, not per client: match a
   // department whose name contains the ticket category (e.g. "SEO",
   // "Billing"). No match → unrouted, triaged from the open queue.
@@ -101,7 +91,7 @@ export async function POST(request: NextRequest) {
       voice_recording_url: payload.recording_url ?? null,
       transcription: transcript || null,
       ai_summary: aiSummary,
-      sla_deadline: slaDeadline,
+      sla_deadline: slaDeadline(priority),
       created_at: payload.timestamp ?? undefined,
     })
     .select("id, title, status")

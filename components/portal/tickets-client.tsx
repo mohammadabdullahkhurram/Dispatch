@@ -44,6 +44,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { SlaCountdown } from "@/components/sla-countdown";
 import { createClient } from "@/lib/supabase/client";
+import { slaDeadline } from "@/lib/sla";
 import { logAudit, logTicketActivity } from "@/lib/audit";
 import { formatDate, formatDateTime, shortId, timeAgo } from "@/lib/format";
 import type {
@@ -52,14 +53,6 @@ import type {
   TicketActivity,
   TicketCategory,
 } from "@/lib/types";
-
-// Client-submitted tickets get an SLA from priority.
-const SLA_HOURS: Record<Priority, number> = {
-  urgent: 4,
-  high: 8,
-  medium: 24,
-  low: 48,
-};
 
 export function PortalTickets({
   userId,
@@ -139,10 +132,6 @@ export function PortalTickets({
         .publicUrl;
     }
 
-    const slaDeadline = new Date(
-      Date.now() + SLA_HOURS[priority] * 3600_000
-    ).toISOString();
-
     const { data: ticket, error } = await supabase
       .from("tickets")
       .insert({
@@ -155,7 +144,7 @@ export function PortalTickets({
         client_id: clientId,
         created_by: userId,
         source: "web",
-        sla_deadline: slaDeadline,
+        sla_deadline: slaDeadline(priority),
       })
       .select()
       .single();

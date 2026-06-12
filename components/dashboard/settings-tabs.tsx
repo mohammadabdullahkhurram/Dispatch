@@ -67,6 +67,8 @@ export interface GhlEnvStatus {
   fromEmail: boolean;
 }
 
+const AUDIT_PAGE_SIZE = 50;
+
 export function SettingsTabs({
   currentUser,
   initialSettings,
@@ -74,6 +76,7 @@ export function SettingsTabs({
   initialDepartments,
   initialCanned,
   auditLogs,
+  auditTotal,
   ghlStatus,
 }: {
   currentUser: UserProfile;
@@ -82,6 +85,7 @@ export function SettingsTabs({
   initialDepartments: Department[];
   initialCanned: CannedResponse[];
   auditLogs: AuditLog[];
+  auditTotal: number;
   ghlStatus: GhlEnvStatus;
 }) {
   const supabase = createClient();
@@ -116,8 +120,28 @@ export function SettingsTabs({
   });
   const [inviting, setInviting] = useState(false);
 
-  // Audit search
+  // Audit log — paged in batches of 50.
   const [auditQuery, setAuditQuery] = useState("");
+  const [audit, setAudit] = useState(auditLogs);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  async function loadMoreAudit() {
+    setAuditLoading(true);
+    const { data, error } = await supabase
+      .from("audit_logs")
+      .select("*, user:users(id, full_name, avatar_url)")
+      .order("created_at", { ascending: false })
+      .range(audit.length, audit.length + AUDIT_PAGE_SIZE - 1);
+    if (error) {
+      flash(`Could not load more entries: ${error.message}`);
+    } else {
+      setAudit((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        return [...prev, ...((data ?? []) as AuditLog[]).filter((a) => !seen.has(a.id))];
+      });
+    }
+    setAuditLoading(false);
+  }
 
   const deptNames = useMemo(
     () => Object.fromEntries(departments.map((d) => [d.id, d.name])),
@@ -126,14 +150,14 @@ export function SettingsTabs({
 
   const filteredAudit = useMemo(() => {
     const q = auditQuery.trim().toLowerCase();
-    if (!q) return auditLogs;
-    return auditLogs.filter(
+    if (!q) return audit;
+    return audit.filter(
       (a) =>
         a.action.toLowerCase().includes(q) ||
         a.entity_type.toLowerCase().includes(q) ||
         (a.user?.full_name ?? "").toLowerCase().includes(q)
     );
-  }, [auditLogs, auditQuery]);
+  }, [audit, auditQuery]);
 
   // Client-only origin, empty on the server render to avoid hydration mismatch.
   const webhookBase = useSyncExternalStore(
@@ -865,14 +889,19 @@ export function SettingsTabs({
 
         {/* Audit log */}
         <TabsContent value="audit" className="mt-4 space-y-4">
-          <div className="relative w-80 max-w-full">
-            <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={auditQuery}
-              onChange={(e) => setAuditQuery(e.target.value)}
-              placeholder="Search action, entity, or user…"
-              className="pl-8"
-            />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="relative w-80 max-w-full">
+              <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={auditQuery}
+                onChange={(e) => setAuditQuery(e.target.value)}
+                placeholder="Search action, entity, or user…"
+                className="pl-8"
+              />
+            </div>
+            <p className="text-sm text-muted-foreground tabular-nums">
+              Showing {audit.length} of {auditTotal} entries
+            </p>
           </div>
           {filteredAudit.length === 0 ? (
             <EmptyState
@@ -917,6 +946,19 @@ export function SettingsTabs({
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          )}
+          {audit.length < auditTotal && !auditQuery.trim() && (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                onClick={loadMoreAudit}
+                disabled={auditLoading}
+              >
+                {auditLoading
+                  ? "Loading…"
+                  : `Load more (${auditTotal - audit.length} remaining)`}
+              </Button>
             </div>
           )}
         </TabsContent>

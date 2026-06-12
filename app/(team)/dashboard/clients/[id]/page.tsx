@@ -34,6 +34,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
+import { BrandKitEditor } from "@/components/brand-kit-editor";
 import { ClientTeam } from "@/components/dashboard/client-team";
 import { ClientStatusToggle } from "@/components/dashboard/client-status-toggle";
 import { DeleteClientButton } from "@/components/dashboard/delete-client-button";
@@ -520,40 +521,14 @@ export default async function ClientProfilePage({
                   <p className="text-sm text-muted-foreground">No logo on file.</p>
                 )}
               </div>
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Colors</p>
-                {Object.keys(brandColors).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No brand colors on file.</p>
-                ) : (
-                  <div className="flex flex-wrap gap-3">
-                    {Object.entries(brandColors).map(([name, hex]) => (
-                      <div key={name} className="text-center">
-                        <span
-                          className="block size-12 rounded-lg border border-border"
-                          style={{ backgroundColor: String(hex) }}
-                        />
-                        <p className="mt-1 text-xs capitalize">{name}</p>
-                        <p className="font-mono text-[10px] text-muted-foreground">{String(hex)}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Fonts</p>
-                {Object.keys(brandFonts).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No brand fonts on file.</p>
-                ) : (
-                  <ul className="space-y-1 text-sm">
-                    {Object.entries(brandFonts).map(([usage, font]) => (
-                      <li key={usage}>
-                        <span className="capitalize text-muted-foreground">{usage}:</span>{" "}
-                        <span className="font-medium">{String(font)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              {profile && (
+                <BrandKitEditor
+                  clientId={client.id}
+                  userId={profile.id}
+                  initialColors={brandColors}
+                  initialFonts={brandFonts}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
