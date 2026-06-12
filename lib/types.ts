@@ -15,7 +15,12 @@ export type OnboardingStatus = "not_started" | "in_progress" | "completed";
 export type ClientStatus = "active" | "inactive";
 export type ThreadStatus = "active" | "closed";
 export type SenderType = "client" | "team" | "bot";
-export type MessageType = "text" | "ticket_card" | "recording" | "meet_link";
+export type MessageType =
+  | "text"
+  | "ticket_card"
+  | "recording"
+  | "meet_link"
+  | "call_log";
 
 export const TEAM_ROLES: UserRole[] = [
   "agency_owner",

@@ -36,7 +36,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit, logTicketActivity } from "@/lib/audit";
-import { timeAgo } from "@/lib/format";
+import { formatDuration, timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type {
   CannedResponse,
@@ -100,6 +100,10 @@ export function ChatWorkspace({
   const [ticketDialogOpen, setTicketDialogOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
   const [quickBusy, setQuickBusy] = useState(false);
+  const [activeCall, setActiveCall] = useState<{
+    contactName: string;
+    startedAt: number;
+  } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Derived loading flag: true until messages for the active thread land.
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -248,6 +252,30 @@ export function ChatWorkspace({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  // The widget hides itself when the call's completion log arrives
+  // from the ghl-call-log webhook (derived, not an effect).
+  const callFinished = useMemo(() => {
+    if (!activeCall) return false;
+    return messages.some((m) => {
+      if (m.message_type !== "call_log") return false;
+      const meta = (m.metadata ?? {}) as { status?: string };
+      return (
+        !!meta.status &&
+        meta.status !== "initiated" &&
+        new Date(m.sent_at).getTime() >= activeCall.startedAt
+      );
+    });
+  }, [messages, activeCall]);
+  const showCallWidget = !!activeCall && !callFinished;
+
+  // Tick the call widget's elapsed timer once a second.
+  const [, setCallTick] = useState(0);
+  useEffect(() => {
+    if (!showCallWidget) return;
+    const interval = setInterval(() => setCallTick((n) => n + 1), 1000);
+    return () => clearInterval(interval);
+  }, [showCallWidget]);
 
   async function sendMessage(
     thread: ChatThread,
@@ -480,10 +508,41 @@ export function ChatWorkspace({
     setQuickBusy(false);
   }
 
-  /** Call-note command prefill — pending real GHL calling support. */
-  function prefillCallNote() {
-    setDraft("/call ");
-    inputRef.current?.focus();
+  /**
+   * Call the client: posts a call_log to the thread and opens the GHL
+   * dialer deep link (GHL has no remote-dial API — the agent's browser
+   * softphone connects first, then GHL bridges to the client from the
+   * Dispatch number). Status/duration/recording arrive later via the
+   * ghl-call-log webhook.
+   */
+  async function quickCall() {
+    if (!active || quickBusy) return;
+    setQuickBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/calls/initiate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ threadId: active.id }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        contactName?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.url) {
+        setError(data.error ?? `Call setup failed (HTTP ${res.status}).`);
+      } else {
+        setActiveCall({
+          contactName: data.contactName ?? "client",
+          startedAt: Date.now(),
+        });
+        window.open(data.url, "_blank", "noopener");
+      }
+    } catch {
+      setError("Call setup failed: network error.");
+    }
+    setQuickBusy(false);
   }
 
   /** Internal: reuse the thread with this exact participant set, or create one. */
@@ -831,15 +890,18 @@ export function ChatWorkspace({
                     >
                       <MessageSquare className="size-4 text-muted-foreground" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Log a call note"
-                      aria-label="Log a call note"
-                      onClick={prefillCallNote}
-                    >
-                      <Phone className="size-4 text-muted-foreground" />
-                    </Button>
+                    {active.category !== "internal" && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Call this client via the GHL dialer"
+                        aria-label="Call this client via the GHL dialer"
+                        onClick={quickCall}
+                        disabled={quickBusy}
+                      >
+                        <Phone className="size-4 text-muted-foreground" />
+                      </Button>
+                    )}
                     {active.category !== "workspace" && (
                       <Button
                         variant="outline"
@@ -954,6 +1016,34 @@ export function ChatWorkspace({
           </>
         )}
       </div>
+
+      {/* Floating call status widget */}
+      {showCallWidget && activeCall && (
+        <div className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border border-border bg-card p-3.5 shadow-lg">
+          <span className="relative flex size-9 items-center justify-center rounded-full bg-emerald-500/15">
+            <Phone className="size-4 text-emerald-400" />
+            <span className="absolute inset-0 animate-ping rounded-full bg-emerald-500/20" />
+          </span>
+          <div className="leading-tight">
+            <p className="text-sm font-medium">
+              Call with {activeCall.contactName}
+            </p>
+            <p className="text-xs tabular-nums text-muted-foreground">
+              {formatDuration(
+                Math.floor((Date.now() - activeCall.startedAt) / 1000)
+              )}{" "}
+              · complete it in the GHL dialer tab
+            </p>
+          </div>
+          <button
+            onClick={() => setActiveCall(null)}
+            className="ml-1 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Dismiss call status"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Quick-action: create ticket from chat context */}
       <Dialog open={ticketDialogOpen} onOpenChange={setTicketDialogOpen}>

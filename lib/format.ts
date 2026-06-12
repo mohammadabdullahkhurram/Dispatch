@@ -61,6 +61,14 @@ export function shortId(id: string): string {
   return id.slice(0, 8).toUpperCase();
 }
 
+/** Seconds → "3m 12s" / "45s". */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 export function isOverdue(iso: string | null): boolean {
   return !!iso && new Date(iso).getTime() < Date.now();
 }

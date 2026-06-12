@@ -98,6 +98,50 @@ client and the message landed in their thread. `"matched": false` means
 no client has that phone number — add it to the client record in
 **Dashboard → Clients**.
 
+## 7. Outbound calling & call logging
+
+GHL exposes **no public API to dial a call** — outbound calls are placed
+in GHL's own browser softphone (LC Phone / Twilio). The click-to-call
+flow: the agent's browser connects first via WebRTC, then GHL bridges
+out to the contact **from the location's number** (`GHL_PHONE_NUMBER`),
+with recording and status tracked by GHL.
+
+Dispatch integrates around that:
+
+1. The **Call icon** in a chat session posts a `call_log` message
+   ("Call initiated to …") and opens the contact in the GHL dialer
+   (`app.gohighlevel.com/v2/location/{GHL_LOCATION_ID}/contacts/detail/{contactId}`)
+   in a new tab. The agent clicks Call there. A floating widget in
+   Dispatch shows the in-progress call.
+2. A GHL workflow reports the outcome back. Create a workflow:
+   trigger **Call Status** (fire on completed/no-answer as desired) →
+   action **Webhook (Custom Webhook)**:
+
+```
+POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call-log
+```
+
+```json
+{
+  "phone": "{{contact.phone}}",
+  "direction": "{{call.direction}}",
+  "call_status": "{{call.status}}",
+  "duration": "{{call.duration}}",
+  "recording_url": "{{call.recording_url}}"
+}
+```
+
+Dispatch matches the phone to a client and posts a `call_log` message
+(direction, status, duration, recording player) into their active
+support session — covering both team callbacks and clients calling
+back outside the IVR flow.
+
+**Concurrency:** LC Phone numbers are Twilio-backed and handle many
+simultaneous calls per number by default; the practical limit is agent
+availability, not lines. Dispatch's call endpoints are stateless
+per-request, so concurrent calls by different team members never
+contend.
+
 ## Notes & hardening TODOs
 
 - The webhook routes use the Supabase **service-role key** (they have no

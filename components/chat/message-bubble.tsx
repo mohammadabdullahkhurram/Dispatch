@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Bot, Ticket as TicketIcon, Video } from "lucide-react";
+import { Bot, Phone, Ticket as TicketIcon, Video } from "lucide-react";
 import { TicketStatusBadge } from "@/components/badges";
 import { UserAvatar } from "@/components/user-avatar";
-import { formatDateTime } from "@/lib/format";
+import { formatDateTime, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, TicketStatus } from "@/lib/types";
 
@@ -31,6 +31,10 @@ export function MessageBubble({
     ticket_title?: string;
     ticket_status?: TicketStatus;
     url?: string;
+    direction?: string;
+    status?: string;
+    duration?: number | null;
+    recording_url?: string | null;
   };
 
   let body: React.ReactNode;
@@ -62,6 +66,31 @@ export function MessageBubble({
         <div className="space-y-1.5">
           {message.content && <p className="text-sm">{message.content}</p>}
           <audio controls src={meta.url} className="h-10 w-64 max-w-full" />
+        </div>
+      );
+      break;
+
+    case "call_log":
+      body = (
+        <div className="min-w-56 space-y-1.5 rounded-lg border border-border bg-card p-3">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Phone className="size-3.5 text-primary" />
+            {meta.direction === "inbound" ? "Inbound call" : "Outbound call"}
+            {meta.status ? ` · ${meta.status}` : ""}
+          </div>
+          {message.content && <p className="text-sm">{message.content}</p>}
+          {meta.duration != null && (
+            <p className="text-xs text-muted-foreground">
+              Duration: {formatDuration(meta.duration)}
+            </p>
+          )}
+          {meta.recording_url && (
+            <audio
+              controls
+              src={meta.recording_url}
+              className="h-9 w-64 max-w-full"
+            />
+          )}
         </div>
       );
       break;
