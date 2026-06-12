@@ -20,28 +20,21 @@ import { OnboardingBadge } from "@/components/badges";
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
 import { NewClientDialog } from "@/components/dashboard/new-client-dialog";
-import type { Client, Department } from "@/lib/types";
+import type { Client } from "@/lib/types";
 
 export function ClientsList({
   clients,
-  departments,
   openTicketCounts,
   currentUserId,
   canCreate,
 }: {
   clients: Client[];
-  departments: Department[];
   openTicketCounts: Record<string, number>;
   currentUserId: string | null;
   canCreate: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
-
-  const departmentNames = useMemo(
-    () => Object.fromEntries(departments.map((d) => [d.id, d.name])),
-    [departments]
-  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -93,10 +86,7 @@ export function ClientsList({
             />
           </div>
           {canCreate && currentUserId && (
-            <NewClientDialog
-              currentUserId={currentUserId}
-              departments={departments}
-            />
+            <NewClientDialog currentUserId={currentUserId} />
           )}
         </div>
       </header>
@@ -119,7 +109,6 @@ export function ClientsList({
                 <TableHead className="w-12" />
                 <TableHead>Company</TableHead>
                 <TableHead>Contact</TableHead>
-                <TableHead>Department</TableHead>
                 <TableHead>Onboarding</TableHead>
                 <TableHead className="text-center">Open tickets</TableHead>
                 <TableHead className="w-24" />
@@ -156,11 +145,6 @@ export function ClientsList({
                   <TableCell>
                     <p className="text-sm">{client.contact_name}</p>
                     <p className="text-xs text-muted-foreground">{client.email}</p>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {client.assigned_department_id
-                      ? (departmentNames[client.assigned_department_id] ?? "—")
-                      : "Unassigned"}
                   </TableCell>
                   <TableCell>
                     <OnboardingBadge status={client.onboarding_status} />

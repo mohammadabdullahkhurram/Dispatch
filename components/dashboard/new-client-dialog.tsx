@@ -14,23 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
-import type { Department } from "@/lib/types";
 
 export function NewClientDialog({
   currentUserId,
-  departments,
 }: {
   currentUserId: string;
-  departments: Department[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,7 +31,6 @@ export function NewClientDialog({
     contact_name: "",
     email: "",
     phone: "",
-    assigned_department_id: "",
     google_drive_folder_url: "",
   });
 
@@ -59,7 +48,6 @@ export function NewClientDialog({
         contact_name: draft.contact_name.trim() || draft.company_name.trim(),
         email: draft.email.trim().toLowerCase(),
         phone: draft.phone.trim() || null,
-        assigned_department_id: draft.assigned_department_id || null,
         google_drive_folder_url: draft.google_drive_folder_url.trim() || null,
         onboarding_status: "not_started",
       })
@@ -83,10 +71,7 @@ export function NewClientDialog({
       entityType: "client",
       entityId: client.id,
       action: "client_created",
-      details: {
-        company_name: client.company_name,
-        department_id: draft.assigned_department_id || null,
-      },
+      details: { company_name: client.company_name },
     });
 
     setOpen(false);
@@ -158,30 +143,6 @@ export function NewClientDialog({
             <p className="text-xs text-muted-foreground">
               Include the country code — SMS routing matches on this number.
             </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Assigned department</Label>
-            <Select
-              value={draft.assigned_department_id || "none"}
-              onValueChange={(v) =>
-                setDraft({
-                  ...draft,
-                  assigned_department_id: v === "none" ? "" : v,
-                })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Unassigned" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {departments.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="nc-drive">Google Drive folder URL (optional)</Label>

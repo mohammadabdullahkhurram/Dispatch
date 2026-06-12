@@ -76,6 +76,16 @@ export async function POST(request: NextRequest) {
     Date.now() + SLA_HOURS[priority] * 3600_000
   ).toISOString();
 
+  // Tickets route to departments per issue, not per client: match a
+  // department whose name contains the ticket category (e.g. "SEO",
+  // "Billing"). No match → unrouted, triaged from the open queue.
+  const { data: matchedDepartment } = await supabase
+    .from("departments")
+    .select("id")
+    .ilike("name", `%${category}%`)
+    .limit(1)
+    .maybeSingle();
+
   const { data: ticket, error: ticketError } = await supabase
     .from("tickets")
     .insert({
@@ -86,7 +96,7 @@ export async function POST(request: NextRequest) {
       status: "open",
       source: "phone",
       client_id: client.id,
-      department_id: client.assigned_department_id,
+      department_id: matchedDepartment?.id ?? null,
       voice_recording_url: payload.recording_url ?? null,
       transcription: transcript || null,
       ai_summary: aiSummary,
@@ -127,7 +137,7 @@ export async function POST(request: NextRequest) {
       },
     }),
     postTicketCard(supabase, client.id, ticket.id, title),
-    notifyDepartmentHead(supabase, client.assigned_department_id, {
+    notifyDepartmentHead(supabase, matchedDepartment?.id ?? null, {
       ticketId: ticket.id,
       title,
       company: client.company_name,

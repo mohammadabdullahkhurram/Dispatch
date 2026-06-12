@@ -1,6 +1,6 @@
 import { ClientsList } from "@/components/dashboard/clients-list";
 import { getCurrentProfile } from "@/lib/data";
-import type { Client, Department, UserRole } from "@/lib/types";
+import type { Client, UserRole } from "@/lib/types";
 
 export const metadata = { title: "Clients" };
 
@@ -15,9 +15,8 @@ const CREATOR_ROLES: UserRole[] = [
 export default async function ClientsPage() {
   const { supabase, profile } = await getCurrentProfile();
 
-  const [clients, departments, openTickets] = await Promise.all([
+  const [clients, openTickets] = await Promise.all([
     supabase.from("clients").select("*").order("company_name"),
-    supabase.from("departments").select("*").order("name"),
     supabase.from("tickets").select("client_id").neq("status", "resolved"),
   ]);
 
@@ -31,7 +30,6 @@ export default async function ClientsPage() {
   return (
     <ClientsList
       clients={(clients.data ?? []) as Client[]}
-      departments={(departments.data ?? []) as Department[]}
       openTicketCounts={openCounts}
       currentUserId={profile?.id ?? null}
       canCreate={!!profile && CREATOR_ROLES.includes(profile.role)}

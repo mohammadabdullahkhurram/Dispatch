@@ -68,7 +68,7 @@ export default async function ClientProfilePage({
   if (!clientRow) notFound();
   const client = clientRow as Client;
 
-  const [tickets, tasks, threads, documents, checklist, clientUsers, department] =
+  const [tickets, tasks, threads, documents, checklist, clientUsers] =
     await Promise.all([
       supabase
         .from("tickets")
@@ -100,13 +100,6 @@ export default async function ClientProfilePage({
         .select("*, user:users(id, email, full_name, avatar_url, ghl_contact_id)")
         .eq("client_id", id)
         .order("created_at", { ascending: true }),
-      client.assigned_department_id
-        ? supabase
-            .from("departments")
-            .select("name")
-            .eq("id", client.assigned_department_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
     ]);
 
   const ticketRows = (tickets.data ?? []) as Ticket[];
@@ -175,7 +168,7 @@ export default async function ClientProfilePage({
           <TabsTrigger value="branding">Branding</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <TabsContent value="overview" className="mt-4 grid gap-4 sm:grid-cols-3">
           <Card>
             <CardContent>
               <p className="text-2xl font-semibold tabular-nums">
@@ -203,15 +196,7 @@ export default async function ClientProfilePage({
               <p className="text-sm text-muted-foreground">Checklist complete</p>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent>
-              <p className="text-2xl font-semibold">
-                {department.data?.name ?? "Unassigned"}
-              </p>
-              <p className="text-sm text-muted-foreground">Department</p>
-            </CardContent>
-          </Card>
-          <Card className="sm:col-span-2 lg:col-span-4">
+          <Card className="sm:col-span-3">
             <CardHeader>
               <CardTitle className="text-base">Details</CardTitle>
             </CardHeader>

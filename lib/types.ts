@@ -120,7 +120,6 @@ export interface Client {
   google_drive_folder_url: string | null;
   onboarding_status: OnboardingStatus;
   status: ClientStatus;
-  assigned_department_id: string | null;
   created_at: string;
 }
 
