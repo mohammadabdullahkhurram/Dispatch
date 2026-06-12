@@ -12,6 +12,7 @@ export type TicketSource = "web" | "phone" | "chat" | "internal";
 export type Priority = "low" | "medium" | "high" | "urgent";
 export type TaskStatus = "todo" | "in_progress" | "done";
 export type OnboardingStatus = "not_started" | "in_progress" | "completed";
+export type ClientStatus = "active" | "inactive";
 export type ThreadStatus = "active" | "closed";
 export type SenderType = "client" | "team";
 export type MessageType = "text" | "ticket_card" | "recording" | "meet_link";
@@ -118,6 +119,7 @@ export interface Client {
   brand_fonts: Record<string, string> | null;
   google_drive_folder_url: string | null;
   onboarding_status: OnboardingStatus;
+  status: ClientStatus;
   assigned_department_id: string | null;
   created_at: string;
 }

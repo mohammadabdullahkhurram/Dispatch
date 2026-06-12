@@ -27,9 +27,27 @@ export default async function PortalLayout({
   const { supabase, profile } = await getCurrentProfile();
 
   let fullAccess = false;
+  let inactive = false;
   if (profile) {
-    const { clientRole } = await getClientContext(supabase, profile);
+    const { client, clientRole } = await getClientContext(supabase, profile);
     fullAccess = isClientAdminRole(clientRole);
+    inactive = client?.status === "inactive";
+  }
+
+  // Inactive clients lose portal access entirely.
+  if (inactive) {
+    return (
+      <div className="flex min-h-screen flex-1 items-center justify-center bg-background p-6">
+        <div className="max-w-md space-y-3 text-center">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Account inactive
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Your account is currently inactive, contact your account manager.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -47,6 +47,41 @@ export default function LoginPage() {
       .single();
 
     const role = (profile?.role ?? "client") as UserRole;
+
+    // Users of deactivated clients can't enter the portal.
+    if (!isTeamRole(role)) {
+      const { data: membership } = await supabase
+        .from("client_users")
+        .select("client:clients(status)")
+        .eq("user_id", data.user.id)
+        .limit(1)
+        .maybeSingle();
+
+      const rel = membership?.client as unknown;
+      let clientStatus = (
+        (Array.isArray(rel) ? rel[0] : rel) as { status?: string } | null
+      )?.status;
+
+      if (!clientStatus) {
+        // Legacy email-linked primary contacts.
+        const { data: legacyClient } = await supabase
+          .from("clients")
+          .select("status")
+          .eq("email", email.trim().toLowerCase())
+          .maybeSingle();
+        clientStatus = legacyClient?.status;
+      }
+
+      if (clientStatus === "inactive") {
+        await supabase.auth.signOut();
+        setError(
+          "Your account is currently inactive, contact your account manager."
+        );
+        setLoading(false);
+        return;
+      }
+    }
+
     router.replace(isTeamRole(role) ? "/dashboard" : "/portal");
     router.refresh();
   }

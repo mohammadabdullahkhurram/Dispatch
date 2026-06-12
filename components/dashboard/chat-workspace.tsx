@@ -45,7 +45,10 @@ export function ChatWorkspace({
   cannedResponses: CannedResponse[];
 }) {
   const [threads, setThreads] = useState(initialThreads);
-  const [activeId, setActiveId] = useState<string | null>(initialThreads[0]?.id ?? null);
+  const [threadView, setThreadView] = useState<"active" | "archived">("active");
+  const [activeId, setActiveId] = useState<string | null>(
+    initialThreads.find((t) => t.status === "active")?.id ?? null
+  );
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Derived loading flag: true until messages for the active thread land.
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -60,6 +63,15 @@ export function ChatWorkspace({
     [threads, activeId]
   );
   const loadingMessages = !!activeId && loadedThreadId !== activeId;
+
+  // Archived = closed threads; read-only until the client is reactivated.
+  const visibleThreads = useMemo(
+    () =>
+      threads.filter((t) =>
+        threadView === "active" ? t.status === "active" : t.status === "closed"
+      ),
+    [threads, threadView]
+  );
 
   const showSlashMenu = draft.startsWith("/") && !draft.includes(" ");
   const matchingCommands = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(draft.toLowerCase()));
@@ -332,17 +344,39 @@ export function ChatWorkspace({
     <div className="flex h-[calc(100vh-57px)] flex-1 md:h-[calc(100vh-53px)]">
       {/* Thread list */}
       <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-80">
-        <div className="border-b border-border px-4 py-3.5">
-          <h1 className="text-base font-semibold tracking-tight">Chat</h1>
-          <p className="text-xs text-muted-foreground">
-            {threads.filter((t) => t.status === "active").length} active conversations
-          </p>
+        <div className="space-y-2.5 border-b border-border px-4 py-3.5">
+          <div>
+            <h1 className="text-base font-semibold tracking-tight">Chat</h1>
+            <p className="text-xs text-muted-foreground">
+              {threads.filter((t) => t.status === "active").length} active conversations
+            </p>
+          </div>
+          <div className="flex rounded-md border border-border p-0.5">
+            {(["active", "archived"] as const).map((view) => (
+              <button
+                key={view}
+                onClick={() => setThreadView(view)}
+                className={cn(
+                  "flex-1 rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors",
+                  threadView === view
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {view}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto">
-          {threads.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">No conversations yet.</p>
+          {visibleThreads.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">
+              {threadView === "active"
+                ? "No active conversations."
+                : "No archived conversations."}
+            </p>
           ) : (
-            threads.map((thread) => {
+            visibleThreads.map((thread) => {
               const unread = unreadByThread[thread.id] ?? 0;
               return (
                 <button

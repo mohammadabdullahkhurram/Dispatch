@@ -31,11 +31,14 @@ import {
   TaskStatusBadge,
   TicketStatusBadge,
 } from "@/components/badges";
+import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
 import { ClientTeam } from "@/components/dashboard/client-team";
-import { createClient } from "@/lib/supabase/server";
+import { ClientStatusToggle } from "@/components/dashboard/client-status-toggle";
+import { getCurrentProfile } from "@/lib/data";
 import { formatDate, formatDateTime, shortId } from "@/lib/format";
+import { isAgencyManagerRole } from "@/lib/types";
 import type {
   ChatThread,
   ChecklistItem,
@@ -54,7 +57,7 @@ export default async function ClientProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
+  const { supabase, profile } = await getCurrentProfile();
 
   const { data: clientRow } = await supabase
     .from("clients")
@@ -139,8 +142,24 @@ export default async function ClientProfilePage({
             {client.phone ? ` · ${client.phone}` : ""}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-3">
+          {client.status === "inactive" && (
+            <Badge
+              variant="outline"
+              className="border-red-500/30 bg-red-500/10 text-red-400"
+            >
+              Inactive
+            </Badge>
+          )}
           <OnboardingBadge status={client.onboarding_status} />
+          {profile && isAgencyManagerRole(profile.role) && (
+            <ClientStatusToggle
+              clientId={client.id}
+              companyName={client.company_name}
+              status={client.status}
+              currentUserId={profile.id}
+            />
+          )}
         </div>
       </header>
 
