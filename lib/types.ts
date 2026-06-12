@@ -203,9 +203,12 @@ export interface TaskComment {
 
 export interface ChatThread {
   id: string;
-  client_id: string;
+  client_id: string | null; // null for internal team threads
   status: ThreadStatus;
-  category: string | null;
+  category: string | null; // "internal" for team threads
+  title: string | null;
+  participant_ids: string[] | null;
+  created_by: string | null;
   last_message_at: string | null;
   created_at: string;
   client?: Pick<

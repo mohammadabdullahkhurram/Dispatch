@@ -163,6 +163,20 @@ export function SettingsTabs({
     return true;
   }
 
+  const canRemoveMembers =
+    currentUser.role === "agency_owner" || currentUser.role === "agency_admin";
+
+  async function removeMember(member: UserProfile) {
+    const res = await fetch(`/api/team/${member.id}`, { method: "DELETE" });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      flash(data.error ?? `Remove failed (HTTP ${res.status}).`);
+      return;
+    }
+    setTeam((prev) => prev.filter((m) => m.id !== member.id));
+    flash(`${member.full_name} removed.`);
+  }
+
   async function updateMember(member: UserProfile, patch: Partial<UserProfile>) {
     const { error } = await supabase.from("users").update(patch).eq("id", member.id);
     if (error) {
@@ -480,6 +494,7 @@ export function SettingsTabs({
                   <TableHead>Member</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Department</TableHead>
+                  {canRemoveMembers && <TableHead className="w-16" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -529,6 +544,20 @@ export function SettingsTabs({
                         </SelectContent>
                       </Select>
                     </TableCell>
+                    {canRemoveMembers && (
+                      <TableCell>
+                        {member.id !== currentUser.id && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeMember(member)}
+                            aria-label={`Remove ${member.full_name}`}
+                          >
+                            <Trash2 className="size-4 text-muted-foreground" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
