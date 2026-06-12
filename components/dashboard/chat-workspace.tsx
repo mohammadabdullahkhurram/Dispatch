@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -93,6 +94,12 @@ export function ChatWorkspace({
   const [selectedClientId, setSelectedClientId] = useState("");
   const [sessionCategory, setSessionCategory] = useState("general");
   const [creatingChat, setCreatingChat] = useState(false);
+
+  // Quick actions (header icons)
+  const [cannedOpen, setCannedOpen] = useState(false);
+  const [ticketDialogOpen, setTicketDialogOpen] = useState(false);
+  const [ticketTitle, setTicketTitle] = useState("");
+  const [quickBusy, setQuickBusy] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Derived loading flag: true until messages for the active thread land.
   const [loadedThreadId, setLoadedThreadId] = useState<string | null>(null);
@@ -139,7 +146,8 @@ export function ChatWorkspace({
 
   const showSlashMenu = draft.startsWith("/") && !draft.includes(" ");
   const matchingCommands = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(draft.toLowerCase()));
-  const showCannedPicker = draft.toLowerCase().startsWith("/canned");
+  const showCannedPicker =
+    cannedOpen || draft.toLowerCase().startsWith("/canned");
 
   // Unread counts for the thread list.
   useEffect(() => {
@@ -329,66 +337,10 @@ export function ChatWorkspace({
     setError(null);
     setSending(true);
     const text = draft.trim();
-    const supabase = createClient();
 
     if (text.startsWith("/ticket")) {
       // /ticket <title> — creates a chat-sourced ticket and drops a ticket card.
-      const title = text.replace("/ticket", "").trim() || "Ticket from chat";
-      const { data: ticket, error: ticketError } = await supabase
-        .from("tickets")
-        .insert({
-          title,
-          description: `Created from chat thread with ${active.client?.company_name ?? "client"}.`,
-          category: "general",
-          client_id: active.client_id,
-          created_by: currentUser.id,
-          source: "chat",
-        })
-        .select()
-        .single();
-
-      if (ticketError || !ticket) {
-        setError(ticketError?.message ?? "Could not create the ticket.");
-      } else {
-        await Promise.all([
-          logTicketActivity(supabase, {
-            ticketId: ticket.id,
-            userId: currentUser.id,
-            action: "created",
-            newValue: title,
-          }),
-          logAudit(supabase, {
-            userId: currentUser.id,
-            entityType: "ticket",
-            entityId: ticket.id,
-            action: "ticket_created",
-            details: { title, source: "chat" },
-          }),
-        ]);
-
-        if (active.category === "workspace") {
-          // Dispatch Bot announces it here via the DB trigger — no
-          // manual card, or we'd double-post.
-        } else {
-          await sendMessage(active, title, "ticket_card", {
-            ticket_id: ticket.id,
-            ticket_title: title,
-            ticket_status: "open",
-          });
-          // Sessions link to the ticket so they auto-close on resolve.
-          if (active.category !== "internal") {
-            await supabase
-              .from("chat_threads")
-              .update({ linked_ticket_id: ticket.id })
-              .eq("id", active.id);
-            setThreads((prev) =>
-              prev.map((t) =>
-                t.id === active.id ? { ...t, linked_ticket_id: ticket.id } : t
-              )
-            );
-          }
-        }
-      }
+      await createTicketFromChat(text.replace("/ticket", "").trim() || "Ticket from chat");
     } else if (text.startsWith("/meet")) {
       const url = text.replace("/meet", "").trim() || "https://meet.google.com/new";
       await sendMessage(active, "Join our Google Meet", "meet_link", { url });
@@ -425,9 +377,112 @@ export function ChatWorkspace({
     });
   }
 
-  /** Prefill a slash command from a header quick-action icon. */
-  function prefillCommand(cmd: string) {
-    setDraft(cmd === "/canned" ? cmd : `${cmd} `);
+  /** Shared by the /ticket command and the quick-action dialog. */
+  async function createTicketFromChat(title: string) {
+    if (!active) return false;
+    const supabase = createClient();
+
+    // Session threads keep their issue category on the ticket.
+    const validCategories = ["seo", "ghl", "software", "billing", "general"];
+    const category = validCategories.includes(active.category ?? "")
+      ? active.category
+      : "general";
+
+    const { data: ticket, error: ticketError } = await supabase
+      .from("tickets")
+      .insert({
+        title,
+        description: `Created from chat thread with ${active.client?.company_name ?? "client"}.`,
+        category,
+        client_id: active.client_id,
+        created_by: currentUser.id,
+        source: "chat",
+      })
+      .select()
+      .single();
+
+    if (ticketError || !ticket) {
+      setError(ticketError?.message ?? "Could not create the ticket.");
+      return false;
+    }
+
+    await Promise.all([
+      logTicketActivity(supabase, {
+        ticketId: ticket.id,
+        userId: currentUser.id,
+        action: "created",
+        newValue: title,
+      }),
+      logAudit(supabase, {
+        userId: currentUser.id,
+        entityType: "ticket",
+        entityId: ticket.id,
+        action: "ticket_created",
+        details: { title, source: "chat" },
+      }),
+    ]);
+
+    if (active.category === "workspace") {
+      // Dispatch Bot announces it here via the DB trigger — no manual
+      // card, or we'd double-post.
+    } else {
+      await sendMessage(active, title, "ticket_card", {
+        ticket_id: ticket.id,
+        ticket_title: title,
+        ticket_status: "open",
+      });
+      // Sessions link to the ticket so they auto-close on resolve.
+      if (active.category !== "internal") {
+        await supabase
+          .from("chat_threads")
+          .update({ linked_ticket_id: ticket.id })
+          .eq("id", active.id);
+        setThreads((prev) =>
+          prev.map((t) =>
+            t.id === active.id ? { ...t, linked_ticket_id: ticket.id } : t
+          )
+        );
+      }
+    }
+    return true;
+  }
+
+  // --- Header quick actions: act immediately, no command typing. ---
+
+  /** Sends a Meet link card right away. */
+  async function quickMeet() {
+    if (!active || quickBusy) return;
+    setQuickBusy(true);
+    await sendMessage(active, "Join our Google Meet", "meet_link", {
+      url: "https://meet.google.com/new",
+    });
+    setQuickBusy(false);
+  }
+
+  /** Opens the create-ticket dialog, title prefilled from chat context. */
+  function quickTicket() {
+    const lastClient = [...messages]
+      .reverse()
+      .find((m) => m.sender_type === "client" && m.content);
+    setTicketTitle(lastClient?.content?.slice(0, 80) ?? "");
+    setTicketDialogOpen(true);
+  }
+
+  async function submitQuickTicket(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ticketTitle.trim() || quickBusy) return;
+    setQuickBusy(true);
+    const ok = await createTicketFromChat(ticketTitle.trim());
+    if (ok) {
+      setTicketDialogOpen(false);
+      setTicketTitle("");
+    }
+    setQuickBusy(false);
+  }
+
+  /** Call-note command prefill — pending real GHL calling support. */
+  function prefillCallNote() {
+    setDraft("/call ");
     inputRef.current?.focus();
   }
 
@@ -746,19 +801,45 @@ export function ChatWorkspace({
               <div className="flex shrink-0 items-center gap-1">
                 {active.status === "active" && (
                   <>
-                    {/* Quick actions — same as the slash commands. */}
-                    {SLASH_COMMANDS.map(({ cmd, hint, icon: Icon }) => (
-                      <Button
-                        key={cmd}
-                        variant="ghost"
-                        size="icon"
-                        title={hint}
-                        aria-label={hint}
-                        onClick={() => prefillCommand(cmd)}
-                      >
-                        <Icon className="size-4 text-muted-foreground" />
-                      </Button>
-                    ))}
+                    {/* Quick actions — immediate, no command typing. */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Create ticket from this chat"
+                      aria-label="Create ticket from this chat"
+                      onClick={quickTicket}
+                      disabled={quickBusy}
+                    >
+                      <TicketIcon className="size-4 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Send a Google Meet link"
+                      aria-label="Send a Google Meet link"
+                      onClick={quickMeet}
+                      disabled={quickBusy}
+                    >
+                      <Video className="size-4 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Insert a canned response"
+                      aria-label="Insert a canned response"
+                      onClick={() => setCannedOpen((v) => !v)}
+                    >
+                      <MessageSquare className="size-4 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Log a call note"
+                      aria-label="Log a call note"
+                      onClick={prefillCallNote}
+                    >
+                      <Phone className="size-4 text-muted-foreground" />
+                    </Button>
                     {active.category !== "workspace" && (
                       <Button
                         variant="outline"
@@ -826,7 +907,12 @@ export function ChatWorkspace({
                     cannedResponses.map((c) => (
                       <button
                         key={c.id}
-                        onClick={() => setDraft(c.body)}
+                        onClick={() => {
+                          // Insert for review — sent when the agent hits enter.
+                          setDraft(c.body);
+                          setCannedOpen(false);
+                          inputRef.current?.focus();
+                        }}
                         className="block w-full rounded-md px-3 py-2 text-left hover:bg-accent"
                       >
                         <p className="text-sm font-medium">{c.title}</p>
@@ -868,6 +954,39 @@ export function ChatWorkspace({
           </>
         )}
       </div>
+
+      {/* Quick-action: create ticket from chat context */}
+      <Dialog open={ticketDialogOpen} onOpenChange={setTicketDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create ticket</DialogTitle>
+            <DialogDescription>
+              {active
+                ? `Files a ${active.category === "workspace" || active.category === "internal" ? "general" : (active.category ?? "general")} ticket for ${threadName(active)} and posts the card to chat.`
+                : "Files a ticket from this conversation."}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitQuickTicket} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-title">Title</Label>
+              <Input
+                id="qt-title"
+                required
+                value={ticketTitle}
+                onChange={(e) => setTicketTitle(e.target.value)}
+                placeholder="Summary of the issue"
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={quickBusy || !ticketTitle.trim()}
+            >
+              {quickBusy ? "Creating…" : "Create ticket"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* New Chat dialog — mode follows the current scope toggle. */}
       <Dialog open={newChatOpen} onOpenChange={setNewChatOpen}>
