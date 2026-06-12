@@ -11,9 +11,10 @@ Add these to `.env.local` (and your Vercel project settings):
 
 | Variable | Where to find it |
 | --- | --- |
-| `GHL_API_KEY` | GHL → Settings → Private Integrations → create a token with `conversations/message.write` and `contacts.readonly` scopes |
+| `GHL_API_KEY` | GHL → Settings → Private Integrations → create a token with `conversations/message.write`, `contacts.readonly`, and `contacts.write` scopes |
 | `GHL_LOCATION_ID` | GHL → Settings → Business Profile (the sub-account/location id) |
 | `GHL_PHONE_NUMBER` | The SMS-enabled number on the location, E.164 format (`+15551234567`) |
+| `GHL_FROM_EMAIL` | A verified sending address on the location — used for team-invite and client-onboarding emails sent through the conversations Email API |
 
 ## 2. Webhook endpoints
 
