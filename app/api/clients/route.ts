@@ -57,6 +57,10 @@ export async function POST(request: NextRequest) {
   const contactName = body?.contact_name?.trim() || companyName;
 
   const admin = createAdminClient();
+  // TEMP DEBUG — env visibility for the email path (booleans only, no secrets)
+  console.log(
+    `[clients][debug] env check: GHL_API_KEY=${!!process.env.GHL_API_KEY} GHL_LOCATION_ID=${!!process.env.GHL_LOCATION_ID} GHL_FROM_EMAIL=${!!process.env.GHL_FROM_EMAIL}`
+  );
   console.log(`[clients] creating client "${companyName}" (owner: ${email})`);
 
   const { data: client, error: insertError } = await admin
@@ -102,6 +106,7 @@ export async function POST(request: NextRequest) {
     console.log(`[clients] reusing existing account ${userId} for ${email}`);
   } else {
     tempPassword = randomBytes(9).toString("base64url"); // 12 chars
+    console.log(`[clients][debug] Creating auth user for ${email}`);
     const { data: created, error: createError } =
       await admin.auth.admin.createUser({
         email,
@@ -113,6 +118,7 @@ export async function POST(request: NextRequest) {
       console.error("[clients] auth user create failed:", createError?.message);
       warning = `Client created, but the portal account failed: ${createError?.message}`;
     } else {
+      console.log(`[clients][debug] Auth user created: ${created.user.id}`);
       userId = created.user.id;
       await admin
         .from("users")
@@ -152,9 +158,13 @@ export async function POST(request: NextRequest) {
         companyName,
         tempPassword,
       });
+      console.log(
+        `[clients][debug] Calling sendEmail (to=${email}, tempPassword=${tempPassword ? "yes" : "no — existing account"})`
+      );
       const sent = await sendEmail(email, subject, html, { contactName });
+      console.log(`[clients][debug] sendEmail result: ${JSON.stringify(sent)}`);
       if (!sent.ok) {
-        console.error("[clients] onboarding email failed:", sent.error);
+        console.error("[clients][debug] sendEmail error:", sent.error);
         warning = warning ?? `Client created, but the onboarding email failed: ${sent.error}`;
       } else {
         console.log(`[clients] onboarding email sent to ${email}`);

@@ -222,22 +222,40 @@ export async function sendEmail(
   console.log(
     `[ghl-email] sending "${subject}" to ${to} (contact ${contact.id}) from ${process.env.GHL_FROM_EMAIL}`
   );
-  const res = await fetch(`${GHL_API_BASE}/conversations/messages`, {
+
+  // TEMP DEBUG — exact request (html omitted for size, API key masked)
+  const url = `${GHL_API_BASE}/conversations/messages`;
+  const payload = {
+    type: "Email",
+    contactId: contact.id,
+    subject,
+    html: htmlBody,
+    emailTo: to,
+    emailFrom: process.env.GHL_FROM_EMAIL,
+  };
+  const apiKey = process.env.GHL_API_KEY ?? "";
+  console.log(`[ghl-email][debug] POST ${url}`);
+  console.log(
+    `[ghl-email][debug] auth: Bearer ${apiKey.slice(0, 4)}…${apiKey.slice(-4)} (len ${apiKey.length}), Version: ${GHL_API_VERSION}`
+  );
+  console.log(
+    `[ghl-email][debug] payload: ${JSON.stringify({ ...payload, html: `<${htmlBody.length} chars>` })}`
+  );
+
+  const res = await fetch(url, {
     method: "POST",
     headers: ghlHeaders(),
-    body: JSON.stringify({
-      type: "Email",
-      contactId: contact.id,
-      subject,
-      html: htmlBody,
-      emailTo: to,
-      emailFrom: process.env.GHL_FROM_EMAIL,
-    }),
+    body: JSON.stringify(payload),
   });
 
+  // TEMP DEBUG — full response, success or not
+  const resBody = await res.text().catch(() => "");
+  console.log(
+    `[ghl-email][debug] response ${res.status} ${res.statusText}: ${resBody.slice(0, 500)}`
+  );
+
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const error = `GHL email send failed (${res.status}): ${body.slice(0, 300)}`;
+    const error = `GHL email send failed (${res.status}): ${resBody.slice(0, 300)}`;
     console.error(`[ghl-email] ${error}`);
     return { ok: false, error };
   }
