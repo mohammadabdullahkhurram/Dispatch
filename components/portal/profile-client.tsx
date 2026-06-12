@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmptyState } from "@/components/empty-state";
 import { AccountSettings } from "@/components/account-settings";
+import { ClientTeam } from "@/components/dashboard/client-team";
 import { createClient } from "@/lib/supabase/client";
 import { logAudit } from "@/lib/audit";
 import { formatDate } from "@/lib/format";
@@ -23,15 +24,19 @@ import type {
   ChecklistItem,
   Client,
   ClientDocument,
+  ClientUser,
   UserProfile,
 } from "@/lib/types";
 
-const VALID_TABS = ["company", "account", "checklist", "documents", "branding"];
+const FULL_TABS = ["company", "account", "team", "checklist", "documents", "branding"];
+const LIMITED_TABS = ["account"];
 
 export function PortalProfile({
   userId,
   profile,
   client,
+  fullAccess,
+  teamMembers,
   initialChecklist,
   documents,
   initialTab,
@@ -39,6 +44,8 @@ export function PortalProfile({
   userId: string;
   profile: UserProfile;
   client: Client;
+  fullAccess: boolean;
+  teamMembers: ClientUser[];
   initialChecklist: ChecklistItem[];
   documents: ClientDocument[];
   initialTab?: string;
@@ -53,7 +60,12 @@ export function PortalProfile({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [uploadingItem, setUploadingItem] = useState<string | null>(null);
 
-  const tab = VALID_TABS.includes(initialTab ?? "") ? initialTab! : "company";
+  const validTabs = fullAccess ? FULL_TABS : LIMITED_TABS;
+  const tab = validTabs.includes(initialTab ?? "")
+    ? initialTab!
+    : fullAccess
+      ? "company"
+      : "account";
 
   async function saveCompanyInfo(e: React.FormEvent) {
     e.preventDefault();
@@ -150,16 +162,27 @@ export function PortalProfile({
 
       <Tabs defaultValue={tab} className="flex-1">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="company">Company Info</TabsTrigger>
+          {fullAccess && <TabsTrigger value="company">Company Info</TabsTrigger>}
           <TabsTrigger value="account">My Account</TabsTrigger>
-          <TabsTrigger value="checklist">Checklist</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="branding">Branding</TabsTrigger>
+          {fullAccess && (
+            <>
+              <TabsTrigger value="team">Team</TabsTrigger>
+              <TabsTrigger value="checklist">Checklist</TabsTrigger>
+              <TabsTrigger value="documents">Documents</TabsTrigger>
+              <TabsTrigger value="branding">Branding</TabsTrigger>
+            </>
+          )}
         </TabsList>
 
         <TabsContent value="account" className="mt-4">
           <AccountSettings profile={profile} />
         </TabsContent>
+
+        {fullAccess && (
+          <TabsContent value="team" className="mt-4">
+            <ClientTeam clientId={client.id} initialMembers={teamMembers} />
+          </TabsContent>
+        )}
 
         <TabsContent value="company" className="mt-4">
           <Card className="max-w-xl">

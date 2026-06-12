@@ -49,7 +49,36 @@ export interface UserProfile {
   created_at: string;
 }
 
-export type ClientUserRole = "owner" | "member";
+export type ClientUserRole =
+  | "account_owner"
+  | "account_admin"
+  | "office_member"
+  | "contractor";
+
+export const CLIENT_ROLE_LABELS: Record<ClientUserRole, string> = {
+  account_owner: "Account Owner",
+  account_admin: "Account Admin",
+  office_member: "Office Member",
+  contractor: "Contractor",
+};
+
+/** Full client data access + self-service team management. */
+export function isClientAdminRole(
+  role: ClientUserRole | null | undefined
+): boolean {
+  return role === "account_owner" || role === "account_admin";
+}
+
+/** Agency roles allowed to manage checklist templates. */
+export function isAgencyManagerRole(
+  role: UserRole | null | undefined
+): boolean {
+  return (
+    role === "agency_owner" ||
+    role === "agency_admin" ||
+    role === "agency_manager"
+  );
+}
 
 export interface ClientUser {
   id: string;
@@ -59,6 +88,15 @@ export interface ClientUser {
   created_at: string;
   // joined
   user?: Pick<UserProfile, "id" | "email" | "full_name" | "avatar_url" | "ghl_contact_id"> | null;
+}
+
+export interface ChecklistTemplate {
+  id: string;
+  item_name: string;
+  description: string | null;
+  required: boolean;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface Department {

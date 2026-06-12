@@ -1,7 +1,9 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import {
+  ArrowUpRight,
   Check,
   Copy,
   Plug,
@@ -338,6 +340,13 @@ export function SettingsTabs({
           <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="canned">Canned Responses</TabsTrigger>
           <TabsTrigger value="audit">Audit Log</TabsTrigger>
+          {/* Routes to its own page; styled to sit with the tabs. */}
+          <Link
+            href="/dashboard/settings/checklist-templates"
+            className="inline-flex items-center gap-1 rounded-md px-3 py-1 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Checklist Templates <ArrowUpRight className="size-3.5" />
+          </Link>
         </TabsList>
 
         {/* General */}

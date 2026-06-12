@@ -7,10 +7,26 @@ import {
   removeDispatchTag,
   searchContactByEmail,
 } from "@/lib/ghl";
-import { isTeamRole, type ClientUserRole, type UserRole } from "@/lib/types";
+import {
+  isClientAdminRole,
+  isTeamRole,
+  type ClientUserRole,
+  type UserRole,
+} from "@/lib/types";
 
-/** Returns the team member's user id, or null if not authorized. */
-async function requireTeamMember(): Promise<string | null> {
+const VALID_ROLES: ClientUserRole[] = [
+  "account_owner",
+  "account_admin",
+  "office_member",
+  "contractor",
+];
+
+/**
+ * Roster changes are allowed for agency team members, and for
+ * account_owner / account_admin users managing their own client.
+ * Returns the actor's user id, or null.
+ */
+async function authorizeRosterManager(clientId: string): Promise<string | null> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -23,7 +39,16 @@ async function requireTeamMember(): Promise<string | null> {
     .eq("id", user.id)
     .single();
 
-  return isTeamRole((profile?.role ?? null) as UserRole | null)
+  if (isTeamRole((profile?.role ?? null) as UserRole | null)) return user.id;
+
+  const { data: membership } = await supabase
+    .from("client_users")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("client_id", clientId)
+    .maybeSingle();
+
+  return isClientAdminRole(membership?.role as ClientUserRole | undefined)
     ? user.id
     : null;
 }
@@ -41,12 +66,15 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const actorId = await requireTeamMember();
+  const { id: clientId } = await params;
+  const actorId = await authorizeRosterManager(clientId);
   if (!actorId) {
-    return NextResponse.json({ error: "Team members only" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Not authorized to manage this client's team" },
+      { status: 403 }
+    );
   }
 
-  const { id: clientId } = await params;
   const body = (await request.json().catch(() => null)) as {
     email?: string;
     full_name?: string;
@@ -55,7 +83,9 @@ export async function POST(
 
   const email = body?.email?.trim().toLowerCase();
   const fullName = body?.full_name?.trim();
-  const role: ClientUserRole = body?.role === "owner" ? "owner" : "member";
+  const role: ClientUserRole = VALID_ROLES.includes(body?.role as ClientUserRole)
+    ? (body!.role as ClientUserRole)
+    : "office_member";
 
   if (!email || !fullName) {
     return NextResponse.json(
@@ -181,12 +211,15 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const actorId = await requireTeamMember();
+  const { id: clientId } = await params;
+  const actorId = await authorizeRosterManager(clientId);
   if (!actorId) {
-    return NextResponse.json({ error: "Team members only" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Not authorized to manage this client's team" },
+      { status: 403 }
+    );
   }
 
-  const { id: clientId } = await params;
   const userId = request.nextUrl.searchParams.get("userId");
   if (!userId) {
     return NextResponse.json(

@@ -1,14 +1,16 @@
 import { MessageSquare } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { PortalChat } from "@/components/portal/chat-client";
-import { getClientForProfile, getCurrentProfile } from "@/lib/data";
+import { getClientContext, getCurrentProfile } from "@/lib/data";
 import type { ChatMessage, ChatThread } from "@/lib/types";
 
 export const metadata = { title: "Chat Support" };
 
 export default async function PortalChatPage() {
   const { supabase, profile } = await getCurrentProfile();
-  const client = profile ? await getClientForProfile(supabase, profile) : null;
+  const { client } = profile
+    ? await getClientContext(supabase, profile)
+    : { client: null };
 
   if (!profile || !client) {
     return (

@@ -1,7 +1,10 @@
 import { Sidebar, type NavItem } from "@/components/sidebar";
-import { getCurrentProfile } from "@/lib/data";
+import { getClientContext, getCurrentProfile } from "@/lib/data";
+import { isClientAdminRole } from "@/lib/types";
 
-const NAV_ITEMS: NavItem[] = [
+// account_owner / account_admin see everything; office_member and
+// contractor get tickets, tasks, and chat only.
+const FULL_NAV: NavItem[] = [
   { href: "/portal", label: "Overview", icon: "dashboard" },
   { href: "/portal/tickets", label: "My Tickets", icon: "tickets" },
   { href: "/portal/chat", label: "Chat Support", icon: "chat" },
@@ -10,17 +13,29 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/portal/profile?tab=branding", label: "Branding", icon: "branding" },
 ];
 
+const LIMITED_NAV: NavItem[] = [
+  { href: "/portal", label: "Overview", icon: "dashboard" },
+  { href: "/portal/tickets", label: "My Tickets", icon: "tickets" },
+  { href: "/portal/chat", label: "Chat Support", icon: "chat" },
+];
+
 export default async function PortalLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { profile } = await getCurrentProfile();
+  const { supabase, profile } = await getCurrentProfile();
+
+  let fullAccess = false;
+  if (profile) {
+    const { clientRole } = await getClientContext(supabase, profile);
+    fullAccess = isClientAdminRole(clientRole);
+  }
 
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-background md:flex-row">
       <Sidebar
-        items={NAV_ITEMS}
+        items={fullAccess ? FULL_NAV : LIMITED_NAV}
         sectionLabel="Client portal"
         profileHref="/portal/profile?tab=account"
         user={{

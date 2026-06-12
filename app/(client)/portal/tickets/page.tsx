@@ -1,14 +1,16 @@
 import { Ticket as TicketIcon } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { PortalTickets } from "@/components/portal/tickets-client";
-import { getClientForProfile, getCurrentProfile } from "@/lib/data";
-import type { Ticket } from "@/lib/types";
+import { getClientContext, getCurrentProfile } from "@/lib/data";
+import { isClientAdminRole, type Ticket } from "@/lib/types";
 
 export const metadata = { title: "My Tickets" };
 
 export default async function PortalTicketsPage() {
   const { supabase, profile } = await getCurrentProfile();
-  const client = profile ? await getClientForProfile(supabase, profile) : null;
+  const { client, clientRole } = profile
+    ? await getClientContext(supabase, profile)
+    : { client: null, clientRole: null };
 
   if (!profile || !client) {
     return (
@@ -22,16 +24,23 @@ export default async function PortalTicketsPage() {
     );
   }
 
-  const { data: tickets } = await supabase
+  // office_member / contractor have no billing visibility.
+  const allowBilling = isClientAdminRole(clientRole);
+
+  let query = supabase
     .from("tickets")
     .select("*")
     .eq("client_id", client.id)
     .order("created_at", { ascending: false });
+  if (!allowBilling) query = query.neq("category", "billing");
+
+  const { data: tickets } = await query;
 
   return (
     <PortalTickets
       userId={profile.id}
       clientId={client.id}
+      allowBilling={allowBilling}
       initialTickets={(tickets ?? []) as Ticket[]}
     />
   );

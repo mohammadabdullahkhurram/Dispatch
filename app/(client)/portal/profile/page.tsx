@@ -1,8 +1,13 @@
 import { UserCircle } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { PortalProfile } from "@/components/portal/profile-client";
-import { getClientForProfile, getCurrentProfile } from "@/lib/data";
-import type { ChecklistItem, ClientDocument } from "@/lib/types";
+import { getClientContext, getCurrentProfile } from "@/lib/data";
+import {
+  isClientAdminRole,
+  type ChecklistItem,
+  type ClientDocument,
+  type ClientUser,
+} from "@/lib/types";
 
 export const metadata = { title: "Profile" };
 
@@ -13,7 +18,9 @@ export default async function PortalProfilePage({
 }) {
   const { tab } = await searchParams;
   const { supabase, profile } = await getCurrentProfile();
-  const client = profile ? await getClientForProfile(supabase, profile) : null;
+  const { client, clientRole } = profile
+    ? await getClientContext(supabase, profile)
+    : { client: null, clientRole: null };
 
   if (!profile || !client) {
     return (
@@ -27,17 +34,30 @@ export default async function PortalProfilePage({
     );
   }
 
-  const [checklist, documents] = await Promise.all([
-    supabase
-      .from("client_checklist_items")
-      .select("*")
-      .eq("client_id", client.id)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("client_documents")
-      .select("*")
-      .eq("client_id", client.id)
-      .order("created_at", { ascending: false }),
+  const fullAccess = isClientAdminRole(clientRole);
+
+  const [checklist, documents, roster] = await Promise.all([
+    fullAccess
+      ? supabase
+          .from("client_checklist_items")
+          .select("*")
+          .eq("client_id", client.id)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    fullAccess
+      ? supabase
+          .from("client_documents")
+          .select("*")
+          .eq("client_id", client.id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
+    fullAccess
+      ? supabase
+          .from("client_users")
+          .select("*, user:users(id, email, full_name, avatar_url, ghl_contact_id)")
+          .eq("client_id", client.id)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
   ]);
 
   return (
@@ -45,6 +65,8 @@ export default async function PortalProfilePage({
       userId={profile.id}
       profile={profile}
       client={client}
+      fullAccess={fullAccess}
+      teamMembers={(roster.data ?? []) as ClientUser[]}
       initialChecklist={(checklist.data ?? []) as ChecklistItem[]}
       documents={(documents.data ?? []) as ClientDocument[]}
       initialTab={tab}

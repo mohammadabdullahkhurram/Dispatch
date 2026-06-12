@@ -21,9 +21,9 @@ import {
   ONBOARDING_LABELS,
 } from "@/components/badges";
 import { EmptyState } from "@/components/empty-state";
-import { getClientForProfile, getCurrentProfile } from "@/lib/data";
+import { getClientContext, getCurrentProfile } from "@/lib/data";
 import { formatDate } from "@/lib/format";
-import type { Ticket } from "@/lib/types";
+import { isClientAdminRole, type Ticket } from "@/lib/types";
 
 export const metadata = { title: "Overview" };
 
@@ -53,7 +53,9 @@ function StatCard({
 
 export default async function PortalOverviewPage() {
   const { supabase, profile } = await getCurrentProfile();
-  const client = profile ? await getClientForProfile(supabase, profile) : null;
+  const { client, clientRole } = profile
+    ? await getClientContext(supabase, profile)
+    : { client: null, clientRole: null };
 
   if (!client) {
     return (
@@ -67,28 +69,42 @@ export default async function PortalOverviewPage() {
     );
   }
 
+  // office_member / contractor: tickets, tasks, chat only — no
+  // checklist/onboarding, and billing tickets are hidden.
+  const fullAccess = isClientAdminRole(clientRole);
+
+  let openTicketsQuery = supabase
+    .from("tickets")
+    .select("id", { count: "exact", head: true })
+    .eq("client_id", client.id)
+    .neq("status", "resolved");
+  let recentTicketsQuery = supabase
+    .from("tickets")
+    .select("*")
+    .eq("client_id", client.id)
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (!fullAccess) {
+    openTicketsQuery = openTicketsQuery.neq("category", "billing");
+    recentTicketsQuery = recentTicketsQuery.neq("category", "billing");
+  }
+
   const [openTickets, checklist, activeThreads, recentTickets] =
     await Promise.all([
-      supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("client_id", client.id)
-        .neq("status", "resolved"),
-      supabase
-        .from("client_checklist_items")
-        .select("id, completed")
-        .eq("client_id", client.id),
+      openTicketsQuery,
+      fullAccess
+        ? supabase
+            .from("client_checklist_items")
+            .select("id, completed")
+            .eq("client_id", client.id)
+        : Promise.resolve({ data: [] }),
       supabase
         .from("chat_threads")
         .select("id", { count: "exact", head: true })
         .eq("client_id", client.id)
         .eq("status", "active"),
-      supabase
-        .from("tickets")
-        .select("*")
-        .eq("client_id", client.id)
-        .order("created_at", { ascending: false })
-        .limit(5),
+      recentTicketsQuery,
     ]);
 
   const checklistItems = checklist.data ?? [];
@@ -126,17 +142,19 @@ export default async function PortalOverviewPage() {
         </div>
       </header>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={`grid gap-4 ${fullAccess ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
         <StatCard
           label="Open tickets"
           value={openTickets.count ?? 0}
           icon={TicketIcon}
         />
-        <StatCard
-          label="Checklist complete"
-          value={`${checklistPct}%`}
-          icon={CheckCircle2}
-        />
+        {fullAccess && (
+          <StatCard
+            label="Checklist complete"
+            value={`${checklistPct}%`}
+            icon={CheckCircle2}
+          />
+        )}
         <StatCard
           label="Active chat threads"
           value={activeThreads.count ?? 0}
@@ -144,25 +162,27 @@ export default async function PortalOverviewPage() {
         />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Onboarding — {ONBOARDING_LABELS[client.onboarding_status]}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <Progress value={checklistPct} />
-          <p className="text-sm text-muted-foreground">
-            {checklistPct}% of your onboarding checklist is complete.{" "}
-            <Link
-              href="/portal/profile?tab=checklist"
-              className="text-primary hover:underline"
-            >
-              View checklist
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
+      {fullAccess && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              Onboarding — {ONBOARDING_LABELS[client.onboarding_status]}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Progress value={checklistPct} />
+            <p className="text-sm text-muted-foreground">
+              {checklistPct}% of your onboarding checklist is complete.{" "}
+              <Link
+                href="/portal/profile?tab=checklist"
+                className="text-primary hover:underline"
+              >
+                View checklist
+              </Link>
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

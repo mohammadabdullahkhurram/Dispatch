@@ -24,7 +24,19 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatDate } from "@/lib/format";
-import type { ClientUser, ClientUserRole } from "@/lib/types";
+import {
+  CLIENT_ROLE_LABELS,
+  isClientAdminRole,
+  type ClientUser,
+  type ClientUserRole,
+} from "@/lib/types";
+
+const ROLE_OPTIONS: ClientUserRole[] = [
+  "account_owner",
+  "account_admin",
+  "office_member",
+  "contractor",
+];
 
 export function ClientTeam({
   clientId,
@@ -38,7 +50,7 @@ export function ClientTeam({
   const [draft, setDraft] = useState({
     email: "",
     full_name: "",
-    role: "member" as ClientUserRole,
+    role: "office_member" as ClientUserRole,
   });
   const [saving, setSaving] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -70,7 +82,7 @@ export function ClientTeam({
 
     setMembers((prev) => [...prev, data.member!]);
     if (data.warning) setWarning(data.warning);
-    setDraft({ email: "", full_name: "", role: "member" });
+    setDraft({ email: "", full_name: "", role: "office_member" });
     setOpen(false);
     setSaving(false);
   }
@@ -157,8 +169,11 @@ export function ClientTeam({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="owner">Owner</SelectItem>
-                    <SelectItem value="member">Member</SelectItem>
+                    {ROLE_OPTIONS.map((role) => (
+                      <SelectItem key={role} value={role}>
+                        {CLIENT_ROLE_LABELS[role]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -208,12 +223,12 @@ export function ClientTeam({
               <Badge
                 variant="outline"
                 className={
-                  member.role === "owner"
+                  isClientAdminRole(member.role)
                     ? "border-primary/30 bg-primary/10 text-primary"
                     : ""
                 }
               >
-                {member.role === "owner" ? "Owner" : "Member"}
+                {CLIENT_ROLE_LABELS[member.role]}
               </Badge>
               {member.user?.ghl_contact_id ? (
                 <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-400">

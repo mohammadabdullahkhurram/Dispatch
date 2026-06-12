@@ -64,10 +64,12 @@ const SLA_HOURS: Record<Priority, number> = {
 export function PortalTickets({
   userId,
   clientId,
+  allowBilling,
   initialTickets,
 }: {
   userId: string;
   clientId: string;
+  allowBilling: boolean;
   initialTickets: Ticket[];
 }) {
   const [tickets, setTickets] = useState(initialTickets);
@@ -243,7 +245,9 @@ export function PortalTickets({
                     <SelectItem value="seo">SEO</SelectItem>
                     <SelectItem value="ghl">GHL</SelectItem>
                     <SelectItem value="software">Software</SelectItem>
-                    <SelectItem value="billing">Billing</SelectItem>
+                    {allowBilling && (
+                      <SelectItem value="billing">Billing</SelectItem>
+                    )}
                     <SelectItem value="general">General</SelectItem>
                   </SelectContent>
                 </Select>
