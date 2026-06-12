@@ -50,7 +50,8 @@ dispatch/
 ├── lib/                         # supabase clients (browser/server/admin/proxy),
 │                                #   ghl.ts, phone.ts, audit.ts, types.ts, format.ts
 ├── supabase/migrations/         # 001–010 (see Migrations)
-├── scripts/                     # reset_test_data.sql (wipe test data, keep users)
+├── scripts/                     # reset_test_data.sql + run-reset.mjs (wipe test
+│                                #   data, keep users/departments/templates)
 └── docs/                        # ghl-setup.md, ivr-setup.md
 ```
 
@@ -84,7 +85,7 @@ dispatch/
 - ✅ Web submission from the portal (category, priority, file upload to storage)
 - ✅ Team kanban board with department/category/priority/assignee filters + create dialog
 - ✅ Categories: SEO, GHL, Software, Billing, General
-- ✅ Priority → SLA deadlines: **urgent 4h, high 8h, medium 24h, low 48h**, live countdown, red when breached
+- 🔧 Priority → SLA deadlines: **urgent 4h, high 8h, medium 24h, low 48h**, live countdown, red when breached — set on portal-submitted and phone tickets only; board/chat-created tickets currently get no deadline (see Known Issues)
 - ✅ Assign/assign-to-me, escalate, status changes, resolve with notes
 - ✅ Activity log on every ticket (plus `audit_logs` for everything)
 - ✅ Tickets from chat (`/ticket` command and header quick-action dialog; sessions link to the ticket and auto-close on resolve)
@@ -173,6 +174,14 @@ dispatch/
 In GHL you need: a private integration token (scopes above), two workflow webhooks pointed at `https://dispatch.loopflo.io/api/webhooks/...` (inbound SMS, completed IVR call), the `dispatch-user` tag convention, and the IVR menu mapping digits 1–5 to ticket categories.
 
 Full guides: **[docs/ghl-setup.md](docs/ghl-setup.md)** (env vars, webhook payload mappings, SMS mirroring, calling) and **[docs/ivr-setup.md](docs/ivr-setup.md)** (IVR menu, post-call payload, test calls).
+
+## Known Issues
+
+- **No SLA on board/chat tickets** — tickets created from the team kanban dialog or the `/ticket` chat command don't set `sla_deadline` (their countdown shows "No SLA"). Only portal submissions and phone tickets compute one.
+- **Audit Log caps at 100** — Settings → Audit Log fetches the latest 100 entries with no pagination.
+- **One active SMS session per client** — inbound SMS lands in the client's most recent active session regardless of topic; a new topic only gets its own session after the previous one is resolved.
+- **Invites record but don't email** — Settings → Team invite writes an audit entry only (no SMTP yet).
+- **Local env is partially configured** — `.env.local` currently has Supabase URL/anon key only; `SUPABASE_SERVICE_ROLE_KEY` and the GHL vars are unset, so webhooks, roster management, and the reset script only work where those are configured (e.g. Vercel).
 
 ## What's Left / Known Gaps
 
