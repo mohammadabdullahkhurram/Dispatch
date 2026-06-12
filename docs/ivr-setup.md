@@ -30,7 +30,7 @@ Create a workflow: trigger **Call Status → Completed**, action
 **Webhook (Custom Webhook)**:
 
 ```
-POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call
+POST https://dispatch.loopflo.io/api/webhooks/ghl-call
 ```
 
 Payload mapping:
@@ -78,7 +78,7 @@ recording playable and the transcript readable in the detail slide-over.
 ## 4. Test without a real call
 
 ```bash
-curl -X POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call \
+curl -X POST https://dispatch.loopflo.io/api/webhooks/ghl-call \
   -H "Content-Type: application/json" \
   -d '{
     "caller_phone": "+15551234567",

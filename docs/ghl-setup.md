@@ -17,12 +17,12 @@ Add these to `.env.local` (and your Vercel project settings):
 
 ## 2. Webhook endpoints
 
-Production base URL: `https://dispatch-navy.vercel.app`
+Production base URL: `https://dispatch.loopflo.io`
 
 | Purpose | Method | URL |
 | --- | --- | --- |
-| Inbound SMS | POST | `https://dispatch-navy.vercel.app/api/webhooks/ghl-sms` |
-| Completed call | POST | `https://dispatch-navy.vercel.app/api/webhooks/ghl-call` |
+| Inbound SMS | POST | `https://dispatch.loopflo.io/api/webhooks/ghl-sms` |
+| Completed call | POST | `https://dispatch.loopflo.io/api/webhooks/ghl-call` |
 
 These URLs are also shown (with copy buttons) in **Dashboard → Settings →
 Integrations**.
@@ -31,7 +31,7 @@ Integrations**.
 
 1. Go to **Automation → Workflows → Create Workflow**.
 2. Trigger: **Customer Replied** → filter to channel **SMS**.
-3. Action: **Webhook (Custom Webhook)** → `POST https://dispatch-navy.vercel.app/api/webhooks/ghl-sms`.
+3. Action: **Webhook (Custom Webhook)** → `POST https://dispatch.loopflo.io/api/webhooks/ghl-sms`.
 4. Map the payload fields exactly:
 
 ```json
@@ -78,7 +78,7 @@ Meet links sent with `/meet` are mirrored as plain text
 Configure the call workflow per [docs/ivr-setup.md](./ivr-setup.md). The
 short version: after a call completes (IVR selection made, recording and
 transcript ready), GHL posts to
-`https://dispatch-navy.vercel.app/api/webhooks/ghl-call` and Dispatch
+`https://dispatch.loopflo.io/api/webhooks/ghl-call` and Dispatch
 creates a triaged, phone-sourced ticket.
 
 ## 6. Test the connection
@@ -88,7 +88,7 @@ creates a triaged, phone-sourced ticket.
 - Or manually:
 
 ```bash
-curl -X POST https://dispatch-navy.vercel.app/api/webhooks/ghl-sms \
+curl -X POST https://dispatch.loopflo.io/api/webhooks/ghl-sms \
   -H "Content-Type: application/json" \
   -d '{"phone": "+15551234567", "message": "Test from curl", "contactId": "test123"}'
 ```
@@ -118,7 +118,7 @@ Dispatch integrates around that:
    action **Webhook (Custom Webhook)**:
 
 ```
-POST https://dispatch-navy.vercel.app/api/webhooks/ghl-call-log
+POST https://dispatch.loopflo.io/api/webhooks/ghl-call-log
 ```
 
 ```json
