@@ -20,6 +20,49 @@ function ghlHeaders() {
 /** Tag that marks a GHL contact as a Dispatch chat user. */
 export const DISPATCH_TAG = "dispatch-user";
 
+/**
+ * Live check that the configured credentials actually work — fetches
+ * one contact from the location. Returns the real API outcome.
+ */
+export async function testGhlConnection(): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!process.env.GHL_API_KEY) {
+    return { ok: false, message: "GHL_API_KEY is not set." };
+  }
+  if (!locationId) {
+    return { ok: false, message: "GHL_LOCATION_ID is not set." };
+  }
+
+  try {
+    const params = new URLSearchParams({ locationId, limit: "1" });
+    const res = await fetch(`${GHL_API_BASE}/contacts/?${params}`, {
+      headers: ghlHeaders(),
+    });
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return {
+        ok: false,
+        message: `GHL responded ${res.status}: ${body.slice(0, 300) || res.statusText}`,
+      };
+    }
+
+    const data = (await res.json()) as { contacts?: unknown[] };
+    return {
+      ok: true,
+      message: `Connected — location reachable (${data.contacts?.length ?? 0} contact${data.contacts?.length === 1 ? "" : "s"} in test query).`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `Could not reach GHL: ${error instanceof Error ? error.message : "unknown error"}`,
+    };
+  }
+}
+
 export interface GhlContact {
   id: string;
   tags: string[];

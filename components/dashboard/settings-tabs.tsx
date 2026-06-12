@@ -60,6 +60,12 @@ function settingValue(settings: AppSetting[], key: string, field: string): strin
   return String(setting?.value?.[field] ?? "");
 }
 
+export interface GhlEnvStatus {
+  apiKey: boolean;
+  locationId: boolean;
+  phoneNumber: boolean;
+}
+
 export function SettingsTabs({
   currentUser,
   initialSettings,
@@ -67,6 +73,7 @@ export function SettingsTabs({
   initialDepartments,
   initialCanned,
   auditLogs,
+  ghlStatus,
 }: {
   currentUser: UserProfile;
   initialSettings: AppSetting[];
@@ -74,6 +81,7 @@ export function SettingsTabs({
   initialDepartments: Department[];
   initialCanned: CannedResponse[];
   auditLogs: AuditLog[];
+  ghlStatus: GhlEnvStatus;
 }) {
   const supabase = createClient();
   const [team, setTeam] = useState(initialTeam);
@@ -89,10 +97,6 @@ export function SettingsTabs({
   });
 
   // Integrations
-  const [integrations, setIntegrations] = useState({
-    ghl_api_key: settingValue(initialSettings, "integrations", "ghl_api_key"),
-    ghl_location_id: settingValue(initialSettings, "integrations", "ghl_location_id"),
-  });
   const [copied, setCopied] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
@@ -288,16 +292,15 @@ export function SettingsTabs({
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch("/api/webhooks/ghl-sms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ test: true, source: "settings_test" }),
-      });
-      setTestResult(
-        res.ok ? "Webhook endpoint reachable ✓" : `Endpoint returned ${res.status}`
-      );
+      const res = await fetch("/api/integrations/ghl-test", { method: "POST" });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        error?: string;
+      };
+      setTestResult(data.message ?? data.error ?? `HTTP ${res.status}`);
     } catch {
-      setTestResult("Could not reach the webhook endpoint.");
+      setTestResult("Could not reach the test endpoint.");
     }
     setTesting(false);
   }
@@ -664,44 +667,51 @@ export function SettingsTabs({
                 );
               })}
 
-              <form
-                className="space-y-4 border-t border-border pt-4"
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  await saveSetting("integrations", integrations);
-                }}
-              >
-                <div className="space-y-1.5">
-                  <Label htmlFor="ghl-key">GHL API key</Label>
-                  <Input
-                    id="ghl-key"
-                    type="password"
-                    value={integrations.ghl_api_key}
-                    onChange={(e) =>
-                      setIntegrations({ ...integrations, ghl_api_key: e.target.value })
-                    }
-                    placeholder="ghl_…"
-                  />
+              <div className="space-y-4 border-t border-border pt-4">
+                <div className="space-y-2">
+                  <Label>Credentials</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Read from environment variables (Vercel project settings) —
+                    not stored in the database.
+                  </p>
+                  <ul className="space-y-2">
+                    {[
+                      { label: "GHL_API_KEY", set: ghlStatus.apiKey },
+                      { label: "GHL_LOCATION_ID", set: ghlStatus.locationId },
+                      { label: "GHL_PHONE_NUMBER", set: ghlStatus.phoneNumber },
+                    ].map(({ label, set }) => (
+                      <li
+                        key={label}
+                        className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+                      >
+                        <span className="font-mono text-xs">{label}</span>
+                        <Badge
+                          variant="outline"
+                          className={
+                            set
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                              : "border-red-500/30 bg-red-500/10 text-red-400"
+                          }
+                        >
+                          {set ? "Set" : "Not set"}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="ghl-location">GHL location ID</Label>
-                  <Input
-                    id="ghl-location"
-                    value={integrations.ghl_location_id}
-                    onChange={(e) =>
-                      setIntegrations({ ...integrations, ghl_location_id: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button type="submit">Save keys</Button>
-                  <Button type="button" variant="outline" onClick={testConnection} disabled={testing}>
-                    <Plug className="size-4" />
-                    {testing ? "Testing…" : "Test connection"}
-                  </Button>
-                </div>
-                {testResult && <p className="text-sm text-muted-foreground">{testResult}</p>}
-              </form>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={testConnection}
+                  disabled={testing}
+                >
+                  <Plug className="size-4" />
+                  {testing ? "Testing…" : "Test connection"}
+                </Button>
+                {testResult && (
+                  <p className="text-sm text-muted-foreground">{testResult}</p>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

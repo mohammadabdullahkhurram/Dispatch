@@ -33,6 +33,11 @@ export default async function SettingsPage() {
       initialDepartments={(departments.data ?? []) as Department[]}
       initialCanned={(canned.data ?? []) as CannedResponse[]}
       auditLogs={(auditLogs.data ?? []) as AuditLog[]}
+      ghlStatus={{
+        apiKey: !!process.env.GHL_API_KEY,
+        locationId: !!process.env.GHL_LOCATION_ID,
+        phoneNumber: !!process.env.GHL_PHONE_NUMBER,
+      }}
     />
   );
 }
