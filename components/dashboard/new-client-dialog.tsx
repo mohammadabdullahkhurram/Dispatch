@@ -14,14 +14,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createClient } from "@/lib/supabase/client";
-import { logAudit } from "@/lib/audit";
-
-export function NewClientDialog({
-  currentUserId,
-}: {
-  currentUserId: string;
-}) {
+// Props kept for call-site compatibility — auditing happens server-side now.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function NewClientDialog(_props: { currentUserId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -39,43 +34,34 @@ export function NewClientDialog({
     setSaving(true);
     setError(null);
 
-    const supabase = createClient();
-    const { data: client, error: insertError } = await supabase
-      .from("clients")
-      .insert({
-        company_name: draft.company_name.trim(),
-        // contact_name is NOT NULL in the schema — fall back to company.
-        contact_name: draft.contact_name.trim() || draft.company_name.trim(),
-        email: draft.email.trim().toLowerCase(),
-        phone: draft.phone.trim() || null,
-        google_drive_folder_url: draft.google_drive_folder_url.trim() || null,
-        onboarding_status: "not_started",
-      })
-      .select("id, company_name")
-      .single();
+    // Server-side route: creates the row (triggers apply checklists +
+    // workspace chat), the account_owner portal login, and sends the
+    // onboarding email via GHL.
+    const res = await fetch("/api/clients", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      client?: { id: string };
+      warning?: string | null;
+      error?: string;
+    };
 
-    if (insertError || !client) {
-      setError(
-        insertError?.code === "23505"
-          ? "A client with this email already exists."
-          : (insertError?.message ?? "Failed to create client.")
-      );
+    if (!res.ok || !data.client) {
+      setError(data.error ?? `Failed to create client (HTTP ${res.status}).`);
       setSaving(false);
       return;
     }
 
-    // The 004 after-insert trigger has already applied all checklist
-    // templates to the new client at this point.
-    await logAudit(supabase, {
-      userId: currentUserId,
-      entityType: "client",
-      entityId: client.id,
-      action: "client_created",
-      details: { company_name: client.company_name },
-    });
+    if (data.warning) {
+      // Client exists — surface the partial failure instead of navigating
+      // silently past it.
+      alert(data.warning);
+    }
 
     setOpen(false);
-    router.push(`/dashboard/clients/${client.id}`);
+    router.push(`/dashboard/clients/${data.client.id}`);
     router.refresh();
   }
 

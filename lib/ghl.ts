@@ -188,25 +188,40 @@ export async function sendEmail(
   htmlBody: string,
   options?: { contactName?: string }
 ): Promise<{ ok: boolean; error?: string }> {
+  // Fail fast with a precise message when the env isn't configured —
+  // these are the usual reasons "the email never arrived".
+  const missing = ["GHL_API_KEY", "GHL_LOCATION_ID", "GHL_FROM_EMAIL"].filter(
+    (key) => !process.env[key]
+  );
+  if (missing.length > 0) {
+    const error = `Email not sent — missing env: ${missing.join(", ")}`;
+    console.error(`[ghl-email] ${error}`);
+    return { ok: false, error };
+  }
+
   let contact: GhlContact | null;
   try {
     contact = await searchContactByEmail(to);
     if (!contact) {
+      console.log(`[ghl-email] no GHL contact for ${to} — creating one`);
       contact = await createGhlContact({
         email: to,
         name: options?.contactName,
       });
     }
   } catch (error) {
-    return {
-      ok: false,
-      error: `GHL contact lookup failed: ${error instanceof Error ? error.message : "unknown error"}`,
-    };
+    const message = `GHL contact lookup failed: ${error instanceof Error ? error.message : "unknown error"}`;
+    console.error(`[ghl-email] ${message}`);
+    return { ok: false, error: message };
   }
   if (!contact) {
+    console.error(`[ghl-email] could not find or create a contact for ${to}`);
     return { ok: false, error: `No GHL contact found or created for ${to}` };
   }
 
+  console.log(
+    `[ghl-email] sending "${subject}" to ${to} (contact ${contact.id}) from ${process.env.GHL_FROM_EMAIL}`
+  );
   const res = await fetch(`${GHL_API_BASE}/conversations/messages`, {
     method: "POST",
     headers: ghlHeaders(),
@@ -216,19 +231,17 @@ export async function sendEmail(
       subject,
       html: htmlBody,
       emailTo: to,
-      ...(process.env.GHL_FROM_EMAIL
-        ? { emailFrom: process.env.GHL_FROM_EMAIL }
-        : {}),
+      emailFrom: process.env.GHL_FROM_EMAIL,
     }),
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    return {
-      ok: false,
-      error: `GHL email send failed (${res.status}): ${body.slice(0, 300)}`,
-    };
+    const error = `GHL email send failed (${res.status}): ${body.slice(0, 300)}`;
+    console.error(`[ghl-email] ${error}`);
+    return { ok: false, error };
   }
+  console.log(`[ghl-email] sent to ${to}`);
   return { ok: true };
 }
 

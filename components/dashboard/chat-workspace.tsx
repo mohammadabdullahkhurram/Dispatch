@@ -30,6 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { EmptyState } from "@/components/empty-state";
 import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { MessageBubble } from "@/components/chat/message-bubble";
@@ -39,13 +41,17 @@ import { slaDeadline } from "@/lib/sla";
 import { logAudit, logTicketActivity } from "@/lib/audit";
 import { timeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type {
-  CannedResponse,
-  ChatMessage,
-  ChatThread,
-  Client,
-  MessageType,
-  UserProfile,
+import {
+  CLIENT_ROLE_LABELS,
+  type CannedResponse,
+  type ChatMessage,
+  type ChatThread,
+  type Client,
+  type ClientUserRole,
+  type MessageType,
+  type Priority,
+  type TicketCategory,
+  type UserProfile,
 } from "@/lib/types";
 
 const SLASH_COMMANDS = [
@@ -65,7 +71,8 @@ function threadName(thread: ChatThread): string {
   if (thread.category === "dm") {
     return thread.title ?? "Direct message";
   }
-  return thread.client?.company_name ?? "Unknown client";
+  // Client threads are named for the company, never a contact person.
+  return thread.client?.company_name ?? thread.title ?? "Unknown client";
 }
 
 export function ChatWorkspace({
@@ -90,6 +97,7 @@ export function ChatWorkspace({
     initialThreads.find((t) => t.category === "workspace")?.id ?? null
   );
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   // New Chat dialog
   const [newChatOpen, setNewChatOpen] = useState(false);
@@ -101,12 +109,24 @@ export function ChatWorkspace({
   // Quick actions (header icons)
   const [cannedOpen, setCannedOpen] = useState(false);
   const [ticketDialogOpen, setTicketDialogOpen] = useState(false);
-  const [ticketTitle, setTicketTitle] = useState("");
+  const [ticketDraft, setTicketDraft] = useState({
+    title: "",
+    description: "",
+    category: "general" as TicketCategory,
+    priority: "medium" as Priority,
+  });
+  const [ticketFile, setTicketFile] = useState<File | null>(null);
   const [quickBusy, setQuickBusy] = useState(false);
 
   // Client roster shown as the Members section on workspace chats.
+  // All client users are equal members here — no point-of-contact.
   const [roster, setRoster] = useState<
-    { user_id: string; full_name: string; avatar_url: string | null }[]
+    {
+      user_id: string;
+      full_name: string;
+      avatar_url: string | null;
+      role: ClientUserRole;
+    }[]
   >([]);
   const [rosterClientId, setRosterClientId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -169,7 +189,7 @@ export function ChatWorkspace({
     const supabase = createClient();
     supabase
       .from("client_users")
-      .select("user_id, user:users(id, full_name, avatar_url)")
+      .select("user_id, role, user:users(id, full_name, avatar_url)")
       .eq("client_id", clientId)
       .then(({ data }) => {
         if (cancelled) return;
@@ -186,6 +206,7 @@ export function ChatWorkspace({
                   user_id: user.id,
                   full_name: user.full_name,
                   avatar_url: user.avatar_url,
+                  role: row.role as ClientUserRole,
                 }
               : null;
           })
@@ -244,52 +265,64 @@ export function ChatWorkspace({
     };
   }, [activeId]);
 
-  // Realtime: new messages across all threads.
+  // Realtime: new messages across all threads. Two sources on one
+  // shared channel: postgres_changes for normal inserts, plus an
+  // explicit broadcast used for trigger-inserted bot messages (ticket
+  // cards) — those land in the same transaction as the ticket insert
+  // and don't reach the inserting tab via postgres_changes, which is
+  // why bot cards previously only showed after a reload.
   useEffect(() => {
     const supabase = createClient();
+
+    async function ingest(incoming: ChatMessage) {
+      setThreads((prev) =>
+        prev
+          .map((t) =>
+            t.id === incoming.thread_id
+              ? { ...t, last_message_at: incoming.sent_at }
+              : t
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.last_message_at ?? b.created_at).getTime() -
+              new Date(a.last_message_at ?? a.created_at).getTime()
+          )
+      );
+      if (incoming.thread_id === activeId) {
+        if (incoming.sender_id && !incoming.sender) {
+          const { data: sender } = await supabase
+            .from("users")
+            .select("id, full_name, avatar_url")
+            .eq("id", incoming.sender_id)
+            .single();
+          incoming.sender = sender ?? null;
+        }
+        setMessages((prev) =>
+          prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]
+        );
+      } else if (incoming.sender_type === "client") {
+        setUnreadByThread((prev) => ({
+          ...prev,
+          [incoming.thread_id]: (prev[incoming.thread_id] ?? 0) + 1,
+        }));
+      }
+    }
+
     const channel = supabase
-      .channel(`team-chat-${currentUser.id}`)
+      .channel("team-chat-live")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages" },
-        async (payload) => {
-          const incoming = payload.new as ChatMessage;
-          setThreads((prev) =>
-            prev
-              .map((t) =>
-                t.id === incoming.thread_id
-                  ? { ...t, last_message_at: incoming.sent_at }
-                  : t
-              )
-              .sort(
-                (a, b) =>
-                  new Date(b.last_message_at ?? b.created_at).getTime() -
-                  new Date(a.last_message_at ?? a.created_at).getTime()
-              )
-          );
-          if (incoming.thread_id === activeId) {
-            if (incoming.sender_id) {
-              const { data: sender } = await supabase
-                .from("users")
-                .select("id, full_name, avatar_url")
-                .eq("id", incoming.sender_id)
-                .single();
-              incoming.sender = sender ?? null;
-            }
-            setMessages((prev) =>
-              prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]
-            );
-          } else if (incoming.sender_type === "client") {
-            setUnreadByThread((prev) => ({
-              ...prev,
-              [incoming.thread_id]: (prev[incoming.thread_id] ?? 0) + 1,
-            }));
-          }
-        }
+        (payload) => ingest(payload.new as ChatMessage)
+      )
+      .on("broadcast", { event: "new_message" }, ({ payload }) =>
+        ingest(payload as ChatMessage)
       )
       .subscribe();
+    channelRef.current = channel;
 
     return () => {
+      channelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, [activeId, currentUser.id]);
@@ -394,8 +427,11 @@ export function ChatWorkspace({
     const text = draft.trim();
 
     if (text.startsWith("/ticket")) {
-      // /ticket <title> — creates a chat-sourced ticket and drops a ticket card.
-      await createTicketFromChat(text.replace("/ticket", "").trim() || "Ticket from chat");
+      // /ticket <title> — opens the full ticket form, title prefilled.
+      openTicketDialog(text.replace("/ticket", "").trim());
+      setDraft("");
+      setSending(false);
+      return;
     } else if (text.startsWith("/meet")) {
       const url = text.replace("/meet", "").trim() || "https://meet.google.com/new";
       await sendMessage(active, "Join our Google Meet", "meet_link", { url });
@@ -430,27 +466,33 @@ export function ChatWorkspace({
   }
 
   /** Shared by the /ticket command and the quick-action dialog. */
-  async function createTicketFromChat(title: string) {
+  async function createTicketFromChat(input: {
+    title: string;
+    description: string;
+    category: TicketCategory;
+    priority: Priority;
+    fileUrl: string | null;
+  }) {
     if (!active) return false;
     const supabase = createClient();
 
-    // Session threads keep their issue category on the ticket.
-    const validCategories = ["seo", "ghl", "software", "billing", "general"];
-    const category = validCategories.includes(active.category ?? "")
-      ? active.category
-      : "general";
+    const baseDescription =
+      input.description.trim() ||
+      `Created from chat thread with ${active.client?.company_name ?? "client"}.`;
 
     const { data: ticket, error: ticketError } = await supabase
       .from("tickets")
       .insert({
-        title,
-        description: `Created from chat thread with ${active.client?.company_name ?? "client"}.`,
-        category,
-        priority: "medium",
+        title: input.title,
+        description: input.fileUrl
+          ? `${baseDescription}\n\nAttachment: ${input.fileUrl}`
+          : baseDescription,
+        category: input.category,
+        priority: input.priority,
         client_id: active.client_id,
         created_by: currentUser.id,
         source: "chat",
-        sla_deadline: slaDeadline("medium"),
+        sla_deadline: slaDeadline(input.priority),
       })
       .select()
       .single();
@@ -465,24 +507,21 @@ export function ChatWorkspace({
         ticketId: ticket.id,
         userId: currentUser.id,
         action: "created",
-        newValue: title,
+        newValue: input.title,
       }),
       logAudit(supabase, {
         userId: currentUser.id,
         entityType: "ticket",
         entityId: ticket.id,
         action: "ticket_created",
-        details: { title, source: "chat" },
+        details: { title: input.title, source: "chat" },
       }),
     ]);
 
-    if (active.category === "workspace") {
-      // Dispatch Bot announces it here via the DB trigger — no manual
-      // card, or we'd double-post.
-    } else {
-      await sendMessage(active, title, "ticket_card", {
+    if (active.category !== "workspace") {
+      await sendMessage(active, input.title, "ticket_card", {
         ticket_id: ticket.id,
-        ticket_title: title,
+        ticket_title: input.title,
         ticket_status: "open",
       });
       // Sessions link to the ticket so they auto-close on resolve.
@@ -496,6 +535,34 @@ export function ChatWorkspace({
             t.id === active.id ? { ...t, linked_ticket_id: ticket.id } : t
           )
         );
+      }
+    }
+
+    // The DB trigger posted Dispatch Bot's ticket_card to the client's
+    // workspace thread in the same transaction — postgres_changes won't
+    // deliver that to this tab, so fetch it, show it, and broadcast it
+    // to every other open chat tab.
+    if (active.client_id) {
+      const { data: botMessage } = await supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("sender_type", "bot")
+        .contains("metadata", { ticket_id: ticket.id })
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (botMessage) {
+        const bot = botMessage as ChatMessage;
+        if (bot.thread_id === activeId) {
+          setMessages((prev) =>
+            prev.some((m) => m.id === bot.id) ? prev : [...prev, bot]
+          );
+        }
+        channelRef.current?.send({
+          type: "broadcast",
+          event: "new_message",
+          payload: bot,
+        });
       }
     }
     return true;
@@ -513,23 +580,58 @@ export function ChatWorkspace({
     setQuickBusy(false);
   }
 
-  /** Opens the create-ticket dialog, title prefilled from chat context. */
-  function quickTicket() {
+  /**
+   * Opens the full create-ticket form. Title prefills from the given
+   * text (the /ticket command argument) or the last client message;
+   * category prefills from the session's issue category.
+   */
+  function openTicketDialog(prefillTitle?: string) {
     const lastClient = [...messages]
       .reverse()
       .find((m) => m.sender_type === "client" && m.content);
-    setTicketTitle(lastClient?.content?.slice(0, 80) ?? "");
+    const validCategories = ["seo", "ghl", "software", "billing", "general"];
+    setTicketDraft({
+      title: prefillTitle || lastClient?.content?.slice(0, 80) || "",
+      description: "",
+      category: (validCategories.includes(active?.category ?? "")
+        ? active!.category
+        : "general") as TicketCategory,
+      priority: "medium",
+    });
+    setTicketFile(null);
     setTicketDialogOpen(true);
   }
 
   async function submitQuickTicket(e: React.FormEvent) {
     e.preventDefault();
-    if (!ticketTitle.trim() || quickBusy) return;
+    if (!ticketDraft.title.trim() || quickBusy) return;
     setQuickBusy(true);
-    const ok = await createTicketFromChat(ticketTitle.trim());
+    setError(null);
+
+    let fileUrl: string | null = null;
+    if (ticketFile) {
+      const supabase = createClient();
+      const path = `tickets/${active?.client_id ?? "internal"}/${Date.now()}-${ticketFile.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("uploads")
+        .upload(path, ticketFile);
+      if (uploadError) {
+        setError(`File upload failed: ${uploadError.message}`);
+        setQuickBusy(false);
+        return;
+      }
+      fileUrl = supabase.storage.from("uploads").getPublicUrl(path).data
+        .publicUrl;
+    }
+
+    const ok = await createTicketFromChat({
+      ...ticketDraft,
+      title: ticketDraft.title.trim(),
+      fileUrl,
+    });
     if (ok) {
       setTicketDialogOpen(false);
-      setTicketTitle("");
+      setTicketFile(null);
     }
     setQuickBusy(false);
   }
@@ -684,6 +786,10 @@ export function ChatWorkspace({
         client_id: selectedClientId,
         status: "active",
         category: "workspace",
+        title:
+          clients.find((c) => c.id === selectedClientId)?.company_name ?? null,
+        // Whole team belongs to every workspace.
+        participant_ids: teamMembers.map((m) => m.id),
         created_by: currentUser.id,
       })
       .select("*, client:clients(id, company_name, contact_name, logo_url)")
@@ -892,6 +998,9 @@ export function ChatWorkspace({
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {member.full_name}
                     </span>
+                    <Badge variant="outline" className="h-4 shrink-0 px-1.5 text-[10px]">
+                      {CLIENT_ROLE_LABELS[member.role] ?? member.role}
+                    </Badge>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -930,7 +1039,9 @@ export function ChatWorkspace({
                 />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">
-                    {active.category === "internal"
+                    {/* Workspace = the company's room; every client user is
+                        an equal member, so no single contact is surfaced. */}
+                    {active.category === "internal" || active.category === "workspace"
                       ? threadName(active)
                       : activeContactName
                         ? `${activeContactName} · ${active.client?.company_name ?? "Unknown client"}`
@@ -956,7 +1067,7 @@ export function ChatWorkspace({
                       size="icon"
                       title="Create ticket from this chat"
                       aria-label="Create ticket from this chat"
-                      onClick={quickTicket}
+                      onClick={() => openTicketDialog()}
                       disabled={quickBusy}
                     >
                       <TicketIcon className="size-4 text-muted-foreground" />
@@ -1113,15 +1224,75 @@ export function ChatWorkspace({
               <Input
                 id="qt-title"
                 required
-                value={ticketTitle}
-                onChange={(e) => setTicketTitle(e.target.value)}
+                value={ticketDraft.title}
+                onChange={(e) =>
+                  setTicketDraft({ ...ticketDraft, title: e.target.value })
+                }
                 placeholder="Summary of the issue"
               />
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-desc">Description</Label>
+              <Textarea
+                id="qt-desc"
+                rows={3}
+                value={ticketDraft.description}
+                onChange={(e) =>
+                  setTicketDraft({ ...ticketDraft, description: e.target.value })
+                }
+                placeholder="What's going on? Defaults to a note about this chat."
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Category</Label>
+                <Select
+                  value={ticketDraft.category}
+                  onValueChange={(v) =>
+                    setTicketDraft({ ...ticketDraft, category: v as TicketCategory })
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="seo">SEO</SelectItem>
+                    <SelectItem value="ghl">GHL</SelectItem>
+                    <SelectItem value="software">Software</SelectItem>
+                    <SelectItem value="billing">Billing</SelectItem>
+                    <SelectItem value="general">General</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Priority</Label>
+                <Select
+                  value={ticketDraft.priority}
+                  onValueChange={(v) =>
+                    setTicketDraft({ ...ticketDraft, priority: v as Priority })
+                  }
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qt-file">Attachment (optional)</Label>
+              <Input
+                id="qt-file"
+                type="file"
+                onChange={(e) => setTicketFile(e.target.files?.[0] ?? null)}
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
             <Button
               type="submit"
               className="w-full"
-              disabled={quickBusy || !ticketTitle.trim()}
+              disabled={quickBusy || !ticketDraft.title.trim()}
             >
               {quickBusy ? "Creating…" : "Create ticket"}
             </Button>

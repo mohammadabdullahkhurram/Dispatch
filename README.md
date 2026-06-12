@@ -53,6 +53,7 @@ dispatch/
 │       ├── webhooks/ghl-sms/      # Inbound SMS (tag-gated) → session chat
 │       ├── webhooks/ghl-call/     # Completed IVR call → ticket + session + call_log
 │       ├── chat/send-sms/         # Mirror team reply to SMS via GHL
+│       ├── clients/               # Create client + portal account + onboarding email
 │       ├── clients/[id]/users/    # Add/remove client users (+ GHL tagging + onboarding email)
 │       ├── cron/notifications/    # Time-based checks (SLA breach, task due/overdue)
 │       ├── integrations/ghl-test/ # Live GHL credential check
@@ -61,7 +62,7 @@ dispatch/
 ├── components/                  # ui/ (shadcn + dispatch-logo), dashboard/, portal/, chat/, shared
 ├── lib/                         # supabase clients, ghl.ts (SMS + email), emails.ts,
 │                                #   sla.ts, phone.ts, audit.ts, types.ts, format.ts
-├── supabase/migrations/         # 001–011 (see Migrations)
+├── supabase/migrations/         # 001–012 (see Migrations)
 ├── scripts/                     # reset_test_data.sql + run-reset.mjs (wipe test
 │                                #   data, keep users/departments/templates)
 └── docs/                        # ghl-setup.md, ivr-setup.md
@@ -133,7 +134,8 @@ Sessions are the only SMS-bridged type: a team reply mirrors out as SMS when the
 - ✅ Consistent components: bordered cards that brighten on hover, pill badges, striped tables with uppercase headers, kanban cards with priority borders, chat bubbles with hover-reveal timestamps
 
 ### Client Management
-- ✅ Create / edit / delete clients (role-gated; checklist templates + workspace chat auto-applied by triggers)
+- ✅ Create clients via `POST /api/clients` — one call creates the row (checklist templates + workspace chat fire by trigger), the contact's portal account as `account_owner` with a 12-char temporary password, the GHL contact + `dispatch-user` tag, and sends the onboarding email (welcome, portal URL, credentials, support number); every step is traced with `[clients]` / `[ghl-email]` logs
+- ✅ Edit / delete clients (role-gated, audit-logged)
 - ✅ Client profile with hero header (logo, quick stats) and **8 underline tabs**: Overview, Team, Tickets, Tasks, Chat History, Documents, Checklist, Branding
 - ✅ Active/inactive status (closes sessions, blocks portal access; reactivation restores)
 - ✅ Multi-user per client with the four roles; SMS sender matching by user phone
@@ -146,13 +148,14 @@ Sessions are the only SMS-bridged type: a team reply mirrors out as SMS when the
 - ✅ Team kanban with filters, priority-colored cards, and a create dialog
 - ✅ **SLA on every path** — urgent 2h / high 8h / medium 24h / low 72h from creation; set by the kanban dialog, `/ticket` chat command, portal submission, and call webhook, with a DB before-insert trigger as backstop; live countdown pulses red when breached
 - ✅ Assign/assign-to-me, escalate, status changes, resolve with notes; per-ticket activity log
-- ✅ Tickets from chat (`/ticket` command + header quick-action; sessions link and auto-close on resolve)
+- ✅ Tickets from chat — `/ticket` and the header icon open the **full form** (title, description, category prefilled from the session, priority, file attachment) with the SLA set from priority; sessions link and auto-close on resolve
 - 🔧 Voice/phone tickets: webhook fully built; the GHL IVR workflow itself is still being configured (see GHL Workflow Status)
 
 ### Chat System
 - ✅ Workspace / Sessions / DMs / Internal (see Chat Architecture above)
+- ✅ Workspaces are **company-named** (never a contact person) and carry the **whole team as participants** — new team members join all workspaces automatically (012 trigger + invite-flow fallback), and the Members list shows every client user with their role (no point-of-contact in workspace context; POC remains a session concept)
 - ✅ **Portal DM view** — clients see a Direct Messages section beside their workspace chat and can send/receive in 1-on-1 threads
-- ✅ Dispatch Bot ticket announcements (DB triggers, centered bot styling)
+- ✅ Dispatch Bot ticket announcements (DB triggers, centered bot styling) — cards appear **instantly**: trigger-inserted messages are re-broadcast over the shared realtime channel since same-transaction inserts don't reach the creating tab via `postgres_changes`
 - ✅ SMS ↔ chat bridge (inbound tag-gated webhook; outbound mirroring for SMS-sourced sessions)
 - ✅ Slash commands + icon shortcuts: `/ticket`, `/meet`, `/canned`; auto-expanding input (Shift+Enter for newline)
 - ✅ **No in-app calling** — by design; live conversations use Google Meet links, inbound IVR calls log as `call_log` messages
@@ -258,10 +261,11 @@ Creates a phone-sourced ticket (priority medium, SLA 24h) + a linked session wit
 | 009 | `call_log` | `call_log` message type for call records |
 | 010 | `dm_poc_sessions` | `point_of_contact_id` on threads, session auto-create for web tickets, DM threads with participant-scoped RLS |
 | 011 | `notifications_and_sla` | Notification triggers (assigned/escalated/resolved/chat), time-based checks fn (SLA breach, task due/overdue) with entity dedupe, SLA before-insert backstop, client read policies for tasks + team names |
+| 012 | `workspace_membership` | Workspace threads titled with `company_name`, whole team as `participant_ids` (create + backfill), triggers to add new team members to all workspaces and remove departed ones |
 
 ## Known Issues
 
-- **Migration 011 must be applied** before the new notification triggers, portal task visibility, and DM name resolution work in production — earlier migrations don't include those policies/triggers.
+- **Migrations 011–012 must be applied** before the notification triggers, portal task visibility, DM name resolution, and workspace auto-membership work in production — earlier migrations don't include those policies/triggers.
 - **One active SMS session per client** — inbound SMS lands in the client's most recent active session regardless of topic; a new topic only gets its own session after the previous one is resolved.
 - **Local env is partially configured** — `.env.local` has Supabase URL/anon key only; `SUPABASE_SERVICE_ROLE_KEY` and the GHL vars are unset locally, so webhooks, invites, emails, and the reset script only work where those are configured (e.g. Vercel).
 - **`new_chat_message` notifies the whole team** — every non-client user is notified of client messages in workspace/session threads; fine at current team size, will need scoping (department/assignee) as the team grows.
@@ -285,7 +289,7 @@ npm install
 
 cp .env.example .env.local   # fill in Supabase (+ GHL) values
 
-# Apply migrations 001–011, either:
+# Apply migrations 001–012, either:
 npx supabase login && npx supabase link --project-ref <your-ref>
 npx supabase db push
 # …or paste each file from supabase/migrations/ into the Studio SQL editor in order.

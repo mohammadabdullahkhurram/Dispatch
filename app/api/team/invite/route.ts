@@ -91,6 +91,23 @@ export async function POST(request: NextRequest) {
       .eq("id", created.user.id);
   }
 
+  // Every team member belongs to every client workspace chat. The 012
+  // DB trigger does this on user insert; this pass is a no-op when the
+  // trigger already ran and a fallback when it hasn't been applied.
+  const { data: workspaces } = await admin
+    .from("chat_threads")
+    .select("id, participant_ids")
+    .eq("category", "workspace");
+  for (const ws of workspaces ?? []) {
+    const ids: string[] = ws.participant_ids ?? [];
+    if (!ids.includes(created.user.id)) {
+      await admin
+        .from("chat_threads")
+        .update({ participant_ids: [...ids, created.user.id] })
+        .eq("id", ws.id);
+    }
+  }
+
   // Email the credentials via GHL. The account exists either way —
   // surface a warning so the admin can follow up manually.
   let emailWarning: string | null = null;
