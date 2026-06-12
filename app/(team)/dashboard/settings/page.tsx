@@ -37,6 +37,7 @@ export default async function SettingsPage() {
         apiKey: !!process.env.GHL_API_KEY,
         locationId: !!process.env.GHL_LOCATION_ID,
         phoneNumber: !!process.env.GHL_PHONE_NUMBER,
+        fromEmail: !!process.env.GHL_FROM_EMAIL,
       }}
     />
   );

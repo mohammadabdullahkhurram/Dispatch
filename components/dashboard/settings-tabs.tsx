@@ -64,6 +64,7 @@ export interface GhlEnvStatus {
   apiKey: boolean;
   locationId: boolean;
   phoneNumber: boolean;
+  fromEmail: boolean;
 }
 
 export function SettingsTabs({
@@ -113,6 +114,7 @@ export function SettingsTabs({
     role: "department_member" as UserRole,
     department_id: "",
   });
+  const [inviting, setInviting] = useState(false);
 
   // Audit search
   const [auditQuery, setAuditQuery] = useState("");
@@ -321,15 +323,27 @@ export function SettingsTabs({
 
   async function sendInvite(e: React.FormEvent) {
     e.preventDefault();
-    // Real invites need the service-role admin API (server-side). Log intent for now.
-    await logAudit(supabase, {
-      userId: currentUser.id,
-      entityType: "user",
-      action: "invite_requested",
-      details: invite as unknown as Record<string, unknown>,
+    setInviting(true);
+    const res = await fetch("/api/team/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(invite),
     });
+    const data = (await res.json().catch(() => ({}))) as {
+      member?: UserProfile;
+      warning?: string | null;
+      error?: string;
+    };
+    setInviting(false);
+    if (!res.ok || !data.member) {
+      flash(data.error ?? `Invite failed (HTTP ${res.status}).`);
+      return;
+    }
+    setTeam((prev) => [...prev, data.member!]);
     flash(
-      `Invite recorded for ${invite.email}. Hook this to a server action with the Supabase admin API to send the email.`
+      data.warning
+        ? `Account created for ${invite.email}, but the email failed: ${data.warning}`
+        : `Invite sent to ${invite.email}.`
     );
     setInvite({ email: "", role: "department_member", department_id: "" });
   }
@@ -480,8 +494,8 @@ export function SettingsTabs({
                     </SelectContent>
                   </Select>
                 </div>
-                <Button type="submit">
-                  <Plus className="size-4" /> Invite
+                <Button type="submit" disabled={inviting}>
+                  <Plus className="size-4" /> {inviting ? "Inviting…" : "Invite"}
                 </Button>
               </form>
             </CardContent>
@@ -708,6 +722,7 @@ export function SettingsTabs({
                       { label: "GHL_API_KEY", set: ghlStatus.apiKey },
                       { label: "GHL_LOCATION_ID", set: ghlStatus.locationId },
                       { label: "GHL_PHONE_NUMBER", set: ghlStatus.phoneNumber },
+                      { label: "GHL_FROM_EMAIL", set: ghlStatus.fromEmail },
                     ].map(({ label, set }) => (
                       <li
                         key={label}

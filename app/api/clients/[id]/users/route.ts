@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -6,7 +7,9 @@ import {
   createGhlContact,
   removeDispatchTag,
   searchContactByEmail,
+  sendEmail,
 } from "@/lib/ghl";
+import { clientOnboardingEmail } from "@/lib/emails";
 import {
   isClientAdminRole,
   isTeamRole,
@@ -109,6 +112,7 @@ export async function POST(
 
   // Reuse an existing account with this email, otherwise create one.
   let userId: string;
+  let tempPassword: string | null = null;
   const { data: existingUser } = await admin
     .from("users")
     .select("id")
@@ -118,9 +122,11 @@ export async function POST(
   if (existingUser) {
     userId = existingUser.id;
   } else {
+    tempPassword = randomBytes(9).toString("base64url");
     const { data: created, error: createError } =
       await admin.auth.admin.createUser({
         email,
+        password: tempPassword,
         email_confirm: true,
         user_metadata: { full_name: fullName, role: "client" },
       });
@@ -184,6 +190,27 @@ export async function POST(
     ghlWarning = "GHL is not configured or unreachable — tag not applied.";
   }
 
+  // Onboarding email for the account owner — portal URL, credentials,
+  // support number. Best-effort like the GHL tagging above.
+  let emailWarning: string | null = null;
+  if (role === "account_owner") {
+    try {
+      const { subject, html } = clientOnboardingEmail({
+        email,
+        fullName,
+        companyName: client.company_name,
+        tempPassword,
+      });
+      const sent = await sendEmail(email, subject, html, {
+        contactName: fullName,
+      });
+      if (!sent.ok) emailWarning = sent.error ?? "Onboarding email failed.";
+    } catch (error) {
+      console.error("[client-users] onboarding email failed:", error);
+      emailWarning = "GHL unreachable — onboarding email not sent.";
+    }
+  }
+
   await admin.from("audit_logs").insert({
     user_id: actorId,
     entity_type: "client_user",
@@ -194,6 +221,7 @@ export async function POST(
       email,
       role,
       ghl_contact_id: ghlContactId,
+      onboarding_email_sent: role === "account_owner" ? !emailWarning : null,
     },
   });
 
@@ -205,7 +233,7 @@ export async function POST(
 
   return NextResponse.json({
     member: { ...membership, user },
-    warning: ghlWarning,
+    warning: [ghlWarning, emailWarning].filter(Boolean).join(" ") || null,
   });
 }
 

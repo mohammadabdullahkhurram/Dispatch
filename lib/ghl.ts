@@ -178,6 +178,61 @@ export async function removeDispatchTag(contactId: string): Promise<boolean> {
 }
 
 /**
+ * Send an email through GHL's conversations API. GHL email is
+ * contact-centric, so we find-or-create the contact by address first.
+ * Sends from GHL_FROM_EMAIL (falls back to the location default).
+ */
+export async function sendEmail(
+  to: string,
+  subject: string,
+  htmlBody: string,
+  options?: { contactName?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  let contact: GhlContact | null;
+  try {
+    contact = await searchContactByEmail(to);
+    if (!contact) {
+      contact = await createGhlContact({
+        email: to,
+        name: options?.contactName,
+      });
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `GHL contact lookup failed: ${error instanceof Error ? error.message : "unknown error"}`,
+    };
+  }
+  if (!contact) {
+    return { ok: false, error: `No GHL contact found or created for ${to}` };
+  }
+
+  const res = await fetch(`${GHL_API_BASE}/conversations/messages`, {
+    method: "POST",
+    headers: ghlHeaders(),
+    body: JSON.stringify({
+      type: "Email",
+      contactId: contact.id,
+      subject,
+      html: htmlBody,
+      emailTo: to,
+      ...(process.env.GHL_FROM_EMAIL
+        ? { emailFrom: process.env.GHL_FROM_EMAIL }
+        : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: `GHL email send failed (${res.status}): ${body.slice(0, 300)}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
  * Send an outbound SMS through GHL. Needs the GHL contact id —
  * pass one from inbound webhook metadata, or we look it up by phone.
  */
