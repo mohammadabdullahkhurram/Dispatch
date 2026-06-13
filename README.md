@@ -62,7 +62,7 @@ dispatch/
 ├── components/                  # ui/ (shadcn + dispatch-logo), dashboard/, portal/, chat/, shared
 ├── lib/                         # supabase clients, ghl.ts (SMS + email), emails.ts,
 │                                #   sla.ts, phone.ts, audit.ts, types.ts, format.ts
-├── supabase/migrations/         # 001–013 (see Migrations)
+├── supabase/migrations/         # 001–014 (see Migrations)
 ├── scripts/                     # reset_test_data.sql + run-reset.mjs (wipe test
 │                                #   data, keep users/departments/templates)
 └── docs/                        # ghl-setup.md, ivr-setup.md
@@ -278,13 +278,19 @@ Creates a phone-sourced ticket (priority medium, SLA 24h) + a linked session wit
 | 011 | `notifications_and_sla` | Notification triggers (assigned/escalated/resolved/chat), time-based checks fn (SLA breach, task due/overdue) with entity dedupe, SLA before-insert backstop, client read policies for tasks + team names |
 | 012 | `workspace_membership` | Workspace threads titled with `company_name`, whole team as `participant_ids` (create + backfill), triggers to add new team members to all workspaces and remove departed ones |
 | 013 | `chat_groupchats` | `chat_type` enum + `group_name`/`group_owner_id`/`is_deletable` on threads, `users.last_seen` for presence, backfill of legacy categories, participant-scoped RLS via `can_access_thread` (dm/group/internal_*), and a trigger blocking deletion of undeletable (workspace) threads |
+| 014 | `fix_thread_chat_type` | **Required fix** — sets `chat_type` in the workspace/session thread triggers (013's default `'session'` was mistyping new clients' workspace threads), repairs mislabeled rows, de-dupes |
+
+> Migrations 001–013 are **applied** in production (verified by probing for each one's columns/functions). **014 is pending** — apply it so new clients' workspace threads are typed correctly. See **[AUDIT.md](AUDIT.md)** for the full audit.
 
 ## Known Issues
 
-- **Migrations 011–013 must be applied** before the notification triggers, portal task visibility, workspace auto-membership, and the new chat model (group chats, presence, participant-scoped RLS) work in production — earlier migrations don't include those policies/triggers. 013 in particular is required for the restructured chat to load.
+- **Migration 014 must be applied** — without it, every new client's workspace chat is created with `chat_type='session'` (013's default), so it lands in the Sessions section and the portal can't find it (Bug #1 in AUDIT.md). The one existing affected row has been repaired; the trigger fix needs the 014 DDL.
+- **Onboarding & invite emails fail with 401** — the GHL token lacks the `conversations/message.write` scope. Code is correct; recreate the Private Integration Token with that scope and update `GHL_API_KEY` (Bug #2 in AUDIT.md).
+- **`ghl-call` webhook is unauthenticated/unsigned** — add a shared-secret before relying on phone tickets in production (S1 in AUDIT.md).
+- **No pagination on Clients / Tickets / Tasks lists** — they fetch all rows; fine at current scale, add `.range()` before data grows.
 - **One active SMS session per client** — inbound SMS lands in the client's most recent active session regardless of topic; a new topic only gets its own session after the previous one is resolved.
-- **Local env is partially configured** — `.env.local` has Supabase URL/anon key only; `SUPABASE_SERVICE_ROLE_KEY` and the GHL vars are unset locally, so webhooks, invites, emails, and the reset script only work where those are configured (e.g. Vercel).
 - **`new_chat_message` notifies the whole team** — every non-client user is notified of client messages in workspace/session threads; fine at current team size, will need scoping (department/assignee) as the team grows.
+- **Temporary debug logging is live** — `[ghl-email][debug]` and `CLIENT CREATION STARTED/FINISHED` remain in `lib/ghl.ts` and `app/api/clients/route.ts` until the email path is confirmed working, then should be stripped.
 
 ## Roadmap
 
@@ -305,7 +311,7 @@ npm install
 
 cp .env.example .env.local   # fill in Supabase (+ GHL) values
 
-# Apply migrations 001–013, either:
+# Apply migrations 001–014, either:
 npx supabase login && npx supabase link --project-ref <your-ref>
 npx supabase db push
 # …or paste each file from supabase/migrations/ into the Studio SQL editor in order.
