@@ -223,13 +223,18 @@ export async function sendEmail(
     `[ghl-email] sending "${subject}" to ${to} (contact ${contact.id}) from ${process.env.GHL_FROM_EMAIL}`
   );
 
-  // TEMP DEBUG — exact request (html omitted for size, API key masked)
+  // Canonical LeadConnector "send email" message: POST /conversations/
+  // messages with type "Email". GHL wants both `html` (rich body) and a
+  // plain-text `message` fallback; emailTo defaults to the contact but
+  // we set it explicitly. Requires the GHL_API_KEY token to carry the
+  // `conversations/message.write` scope.
   const url = `${GHL_API_BASE}/conversations/messages`;
   const payload = {
     type: "Email",
     contactId: contact.id,
     subject,
     html: htmlBody,
+    message: htmlToText(htmlBody),
     emailTo: to,
     emailFrom: process.env.GHL_FROM_EMAIL,
   };
@@ -239,7 +244,7 @@ export async function sendEmail(
     `[ghl-email][debug] auth: Bearer ${apiKey.slice(0, 4)}…${apiKey.slice(-4)} (len ${apiKey.length}), Version: ${GHL_API_VERSION}`
   );
   console.log(
-    `[ghl-email][debug] payload: ${JSON.stringify({ ...payload, html: `<${htmlBody.length} chars>` })}`
+    `[ghl-email][debug] payload: ${JSON.stringify({ ...payload, html: `<${htmlBody.length} chars>`, message: `<${payload.message.length} chars>` })}`
   );
 
   const res = await fetch(url, {
@@ -248,19 +253,44 @@ export async function sendEmail(
     body: JSON.stringify(payload),
   });
 
-  // TEMP DEBUG — full response, success or not
   const resBody = await res.text().catch(() => "");
   console.log(
     `[ghl-email][debug] response ${res.status} ${res.statusText}: ${resBody.slice(0, 500)}`
   );
 
   if (!res.ok) {
-    const error = `GHL email send failed (${res.status}): ${resBody.slice(0, 300)}`;
+    // 401/403 here is a token-scope problem, not a payload problem —
+    // give the exact remediation so it isn't mistaken for a code bug.
+    const scopeIssue =
+      res.status === 401 ||
+      res.status === 403 ||
+      /scope/i.test(resBody);
+    const error = scopeIssue
+      ? `GHL email rejected (${res.status}): the GHL_API_KEY token lacks the "conversations/message.write" scope. ` +
+        `Private Integration Token scopes can't be edited — create a new token in GHL ` +
+        `(Settings → Private Integrations) with conversations/message.write, contacts.readonly, ` +
+        `and contacts.write, then update GHL_API_KEY. Also confirm the location has an email ` +
+        `sending service connected. Raw: ${resBody.slice(0, 200)}`
+      : `GHL email send failed (${res.status}): ${resBody.slice(0, 300)}`;
     console.error(`[ghl-email] ${error}`);
     return { ok: false, error };
   }
   console.log(`[ghl-email] sent to ${to}`);
   return { ok: true };
+}
+
+/** Minimal HTML→text for the plain-text email part. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&mdash;/g, "—")
+    .replace(/&rarr;/g, "→")
+    .replace(/&ldquo;|&rdquo;/g, '"')
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
