@@ -46,7 +46,7 @@ dispatch/
 │   │   ├── clients/             # Searchable list + 8-tab client profile (hero header)
 │   │   ├── tickets/             # Kanban (Open/In Progress/Escalated/Resolved)
 │   │   ├── tasks/               # Kanban/list, filters, comments
-│   │   ├── chat/                # Workspace / Sessions / Internal chat + DMs
+│   │   ├── chat/                # Workspace / Internal / Sessions — DMs, groups, presence
 │   │   ├── notifications/       # Realtime list, filters, mark-all-read
 │   │   └── settings/            # Two-column settings + profile + checklist templates
 │   └── api/
@@ -62,7 +62,7 @@ dispatch/
 ├── components/                  # ui/ (shadcn + dispatch-logo), dashboard/, portal/, chat/, shared
 ├── lib/                         # supabase clients, ghl.ts (SMS + email), emails.ts,
 │                                #   sla.ts, phone.ts, audit.ts, types.ts, format.ts
-├── supabase/migrations/         # 001–012 (see Migrations)
+├── supabase/migrations/         # 001–013 (see Migrations)
 ├── scripts/                     # reset_test_data.sql + run-reset.mjs (wipe test
 │                                #   data, keep users/departments/templates)
 └── docs/                        # ghl-setup.md, ivr-setup.md
@@ -70,7 +70,7 @@ dispatch/
 
 **Route groups:** `(auth)` is public; `(client)` and `(team)` are fenced by `proxy.ts`, which refreshes the Supabase session, reads the user's role, and keeps clients in `/portal` and team members in `/dashboard`.
 
-**Database (16 tables):** `users` (mirrors `auth.users`, role enum), `departments`, `clients` (+ status, branding jsonb), `client_users` (multi-user roster, 4 roles), `client_checklist_items`, `checklist_templates`, `client_documents`, `tickets` (+ SLA, transcription, AI summary), `ticket_activity_log`, `tasks`, `task_comments`, `chat_threads` (workspace/session/internal/dm), `chat_messages` (text/ticket_card/recording/meet_link/call_log), `notifications` (+ entity dedupe), `audit_logs`, `canned_responses`, `app_settings`. Everything is under RLS: team-wide access via `is_team_member()`, client access scoped through `current_client_id()`. DB triggers handle: new-user profile creation, new-client workspace thread + checklist application, Dispatch Bot ticket announcements, linked-session auto-close, SLA-deadline backstop, and all event notifications (so every creation path is covered).
+**Database (16 tables):** `users` (mirrors `auth.users`, role enum), `departments`, `clients` (+ status, branding jsonb), `client_users` (multi-user roster, 4 roles), `client_checklist_items`, `checklist_templates`, `client_documents`, `tickets` (+ SLA, transcription, AI summary), `ticket_activity_log`, `tasks`, `task_comments`, `chat_threads` (`chat_type`: workspace/dm/group/session/internal_dm/internal_group; + group/presence fields), `chat_messages` (text/ticket_card/recording/meet_link/call_log), `notifications` (+ entity dedupe), `audit_logs`, `canned_responses`, `app_settings`. Everything is under RLS: team-wide access via `is_team_member()`, client access scoped through `current_client_id()`. DB triggers handle: new-user profile creation, new-client workspace thread + checklist application, Dispatch Bot ticket announcements, linked-session auto-close, SLA-deadline backstop, and all event notifications (so every creation path is covered).
 
 ## Roles & Permissions
 
@@ -105,16 +105,28 @@ All client roles are read-only on tasks (no internal comments exposed) and can s
 
 ## Chat Architecture
 
-Four thread types live in `chat_threads.category`:
+A WhatsApp/Slack-style model. The team chat sidebar has three collapsible top-level sections — **Workspace**, **Internal**, **Sessions** — each with a `+` to start a chat in that section, a search box across all threads, unread badges, and presence dots. Every thread carries a `chat_type` (`chat_threads.chat_type`):
 
-| Type | `category` | Created by | Who sees it | Example |
-| --- | --- | --- | --- | --- |
-| **Workspace** | `workspace` | Automatically with the client | Whole team + all client users | The permanent "Acme Co. ↔ Bluejaypro" room; Dispatch Bot posts ticket updates here |
-| **Session** | issue category (`seo`, `billing`, …) | Web ticket, inbound SMS/call, or team | Whole team + client users | A client texts about an invoice → a `billing` session opens, linked to its ticket, and auto-closes when the ticket resolves |
-| **DM** | `dm` | Team member from the workspace Members list | The two participants + agency owners/admins | An account manager pings Acme's office manager 1-on-1; the client replies from Portal → Chat → Direct Messages |
-| **Internal** | `internal` | Team member | Selected team participants only | "SEO squad" group thread — clients never see it |
+| `chat_type` | Section | Created by | Who sees it | Resolves? | Deletable? |
+| --- | --- | --- | --- | --- | --- |
+| `workspace` | Workspace | Automatically per client | Whole team + all that client's users | Never | No (hard-protected) |
+| `dm` | Workspace | New → Workspace DM | The team member + the client user (+ owners/admins) | Never | Yes (type-"Delete") |
+| `group` | Workspace | New → Workspace Group | Listed client users + team members | Never | Yes (type-"Delete") |
+| `internal_dm` | Internal | New → Internal DM | The two teammates | Never | Yes (type-"Delete") |
+| `internal_group` | Internal | New → Internal Group | Listed team members | Never | Yes (type-"Delete") |
+| `session` | Sessions | Web ticket, inbound SMS/call, or team | Whole team (+ the client's portal does **not** show sessions) | Yes (active → closed, auto-closes with its ticket) | Yes |
 
-Sessions are the only SMS-bridged type: a team reply mirrors out as SMS when the client's last inbound message arrived via SMS. Workspace, DM, and internal threads are web-only. Each session carries a **point of contact** — the client user who submitted the ticket or whose phone matched the SMS/call.
+**Sidebar nesting:** under Workspace, each client is a collapsible header showing its `[Company] Workspace` thread, a Direct Messages list, and a Groups list. Internal shows team DMs and groups. Sessions shows active + a collapsible Archived list.
+
+**Groups:** the creator is the `group_owner_id`; the owner (or any agency owner/admin) can rename the group and add/remove members. The header shows member avatars, a member count, and a manage button. Group/DM rows show a member-count chip / presence dot respectively.
+
+**Deletion:** workspaces can never be deleted (a `before delete` trigger enforces it even against direct SQL). DMs and groups delete via a double confirmation — a "this permanently deletes all messages" warning, then typing `Delete` to confirm.
+
+**Presence:** `users.last_seen` is stamped on load and every 2 minutes while the tab is visible; a user is **online** if seen within 5 minutes (green dot, else grey).
+
+**SMS bridge:** sessions are the only SMS-mirrored type — a team reply goes out as SMS when the client's last inbound message arrived via SMS. Workspace, DM, group, and internal threads are web-only. Each session carries a **point of contact** — the client user who submitted the ticket or whose phone matched the SMS/call.
+
+**Portal (`/portal/chat`):** clients see their company workspace thread, DMs with Dispatch team members, and any group they're a participant of — **never sessions** — plus a `+` to start a new DM with a team member. Participant-scoping is enforced in RLS (`can_access_thread`), not just the UI.
 
 ## Features
 
@@ -152,9 +164,12 @@ Sessions are the only SMS-bridged type: a team reply mirrors out as SMS when the
 - 🔧 Voice/phone tickets: webhook fully built; the GHL IVR workflow itself is still being configured (see GHL Workflow Status)
 
 ### Chat System
-- ✅ Workspace / Sessions / DMs / Internal (see Chat Architecture above)
-- ✅ Workspaces are **company-named** (never a contact person) and carry the **whole team as participants** — new team members join all workspaces automatically (012 trigger + invite-flow fallback), and the Members list shows every client user with their role (no point-of-contact in workspace context; POC remains a session concept)
-- ✅ **Portal DM view** — clients see a Direct Messages section beside their workspace chat and can send/receive in 1-on-1 threads
+- ✅ WhatsApp/Slack-style three-section model — Workspace / Internal / Sessions, collapsible with per-section create, cross-thread search, unread badges, and presence dots (see Chat Architecture above)
+- ✅ **DMs & group chats** — Workspace DMs/groups (client users + team) and Internal DMs/groups (team-only); named, persistent, never resolve; group owner or admin can rename and add/remove members; member avatars + count in the header
+- ✅ **Delete protection** — workspaces can't be deleted (DB trigger); DMs/groups need a two-step type-"Delete" confirmation
+- ✅ **Presence** — green/grey online dots driven by `users.last_seen` (online = active within 5 minutes)
+- ✅ Workspaces are **company-named** and carry the **whole team as participants** — new team members join all workspaces automatically (012 trigger + invite-flow fallback)
+- ✅ **Portal chat** — clients see their workspace thread, DMs with team members, and groups they're in (no sessions), with a `+` to start a new DM
 - ✅ Dispatch Bot ticket announcements (DB triggers, centered bot styling) — cards appear **instantly**: trigger-inserted messages are re-broadcast over the shared realtime channel since same-transaction inserts don't reach the creating tab via `postgres_changes`
 - ✅ SMS ↔ chat bridge (inbound tag-gated webhook; outbound mirroring for SMS-sourced sessions)
 - ✅ Slash commands + icon shortcuts: `/ticket`, `/meet`, `/canned`; auto-expanding input (Shift+Enter for newline)
@@ -262,10 +277,11 @@ Creates a phone-sourced ticket (priority medium, SLA 24h) + a linked session wit
 | 010 | `dm_poc_sessions` | `point_of_contact_id` on threads, session auto-create for web tickets, DM threads with participant-scoped RLS |
 | 011 | `notifications_and_sla` | Notification triggers (assigned/escalated/resolved/chat), time-based checks fn (SLA breach, task due/overdue) with entity dedupe, SLA before-insert backstop, client read policies for tasks + team names |
 | 012 | `workspace_membership` | Workspace threads titled with `company_name`, whole team as `participant_ids` (create + backfill), triggers to add new team members to all workspaces and remove departed ones |
+| 013 | `chat_groupchats` | `chat_type` enum + `group_name`/`group_owner_id`/`is_deletable` on threads, `users.last_seen` for presence, backfill of legacy categories, participant-scoped RLS via `can_access_thread` (dm/group/internal_*), and a trigger blocking deletion of undeletable (workspace) threads |
 
 ## Known Issues
 
-- **Migrations 011–012 must be applied** before the notification triggers, portal task visibility, DM name resolution, and workspace auto-membership work in production — earlier migrations don't include those policies/triggers.
+- **Migrations 011–013 must be applied** before the notification triggers, portal task visibility, workspace auto-membership, and the new chat model (group chats, presence, participant-scoped RLS) work in production — earlier migrations don't include those policies/triggers. 013 in particular is required for the restructured chat to load.
 - **One active SMS session per client** — inbound SMS lands in the client's most recent active session regardless of topic; a new topic only gets its own session after the previous one is resolved.
 - **Local env is partially configured** — `.env.local` has Supabase URL/anon key only; `SUPABASE_SERVICE_ROLE_KEY` and the GHL vars are unset locally, so webhooks, invites, emails, and the reset script only work where those are configured (e.g. Vercel).
 - **`new_chat_message` notifies the whole team** — every non-client user is notified of client messages in workspace/session threads; fine at current team size, will need scoping (department/assignee) as the team grows.
@@ -289,7 +305,7 @@ npm install
 
 cp .env.example .env.local   # fill in Supabase (+ GHL) values
 
-# Apply migrations 001–012, either:
+# Apply migrations 001–013, either:
 npx supabase login && npx supabase link --project-ref <your-ref>
 npx supabase db push
 # …or paste each file from supabase/migrations/ into the Studio SQL editor in order.

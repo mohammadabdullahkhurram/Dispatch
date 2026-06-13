@@ -1,63 +1,84 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, SendHorizonal, Users } from "lucide-react";
+import { MessageSquare, Plus, SendHorizonal, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { EmptyState } from "@/components/empty-state";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { PresenceDot, isOnline, usePresenceHeartbeat } from "@/components/chat/presence";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { ChatMessage, ChatThread } from "@/lib/types";
 
-type DmContact = { id: string; full_name: string; avatar_url: string | null };
+type TeamMember = {
+  id: string;
+  full_name: string;
+  avatar_url: string | null;
+  last_seen: string | null;
+};
 
 /**
- * The client's chat hub: the persistent workspace thread with the
- * Bluejaypro team, plus any direct messages they're part of.
+ * Client chat hub: the company workspace thread, DMs with Dispatch
+ * team members, and any group chats the user is in. Sessions are never
+ * shown here. Clients can start a new DM with a team member.
  */
 export function PortalChat({
   userId,
+  clientId,
   thread,
   initialMessages,
   dmThreads = [],
-  dmContacts = [],
+  groupThreads = [],
+  team = [],
 }: {
   userId: string;
+  clientId: string;
   thread: ChatThread;
   initialMessages: ChatMessage[];
   dmThreads?: ChatThread[];
-  dmContacts?: DmContact[];
+  groupThreads?: ChatThread[];
+  team?: TeamMember[];
 }) {
+  usePresenceHeartbeat(userId);
+
+  const [threads, setThreads] = useState({ dms: dmThreads, groups: groupThreads });
   const [activeId, setActiveId] = useState(thread.id);
   const [messagesByThread, setMessagesByThread] = useState<
     Record<string, ChatMessage[]>
   >({ [thread.id]: initialMessages });
-  const [loadedIds, setLoadedIds] = useState<Set<string>>(
-    new Set([thread.id])
-  );
+  const [loadedIds, setLoadedIds] = useState<Set<string>>(new Set([thread.id]));
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newDmOpen, setNewDmOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const contactById = useMemo(
-    () => Object.fromEntries(dmContacts.map((c) => [c.id, c])),
-    [dmContacts]
+  const teamById = useMemo(
+    () => Object.fromEntries(team.map((m) => [m.id, m])),
+    [team]
   );
 
   const isWorkspace = activeId === thread.id;
-  const activeDm = dmThreads.find((t) => t.id === activeId) ?? null;
-  const activeDmContact = activeDm
-    ? (activeDm.participant_ids ?? [])
-        .filter((id) => id !== userId)
-        .map((id) => contactById[id])
-        .find(Boolean)
-    : null;
+  const activeDm = threads.dms.find((t) => t.id === activeId) ?? null;
+  const activeGroup = threads.groups.find((t) => t.id === activeId) ?? null;
+
+  function dmOther(t: ChatThread): TeamMember | undefined {
+    const id = (t.participant_ids ?? []).find((p) => p !== userId);
+    return id ? teamById[id] : undefined;
+  }
+
   const messages = messagesByThread[activeId] ?? [];
 
-  // Lazy-load DM history the first time a thread is opened.
+  // Lazy-load history the first time a thread is opened.
   useEffect(() => {
     if (loadedIds.has(activeId)) return;
     const supabase = createClient();
@@ -80,7 +101,7 @@ export function PortalChat({
     };
   }, [activeId, loadedIds]);
 
-  // Realtime inserts for the active thread (team replies, bot updates).
+  // Realtime for the active thread.
   useEffect(() => {
     const supabase = createClient();
     const channel = supabase
@@ -111,7 +132,6 @@ export function PortalChat({
         }
       )
       .subscribe();
-
     return () => {
       supabase.removeChannel(channel);
     };
@@ -126,7 +146,6 @@ export function PortalChat({
     if (!draft.trim() || sending) return;
     setError(null);
     setSending(true);
-
     const supabase = createClient();
     const { data: message, error: messageError } = await supabase
       .from("chat_messages")
@@ -145,12 +164,10 @@ export function PortalChat({
       setSending(false);
       return;
     }
-
     await supabase
       .from("chat_threads")
       .update({ last_message_at: new Date().toISOString() })
       .eq("id", activeId);
-
     setMessagesByThread((prev) => {
       const list = prev[activeId] ?? [];
       if (list.some((m) => m.id === message.id)) return prev;
@@ -160,15 +177,58 @@ export function PortalChat({
     setSending(false);
   }
 
+  /** Open or create a DM with a Dispatch team member. */
+  async function startDm(memberId: string) {
+    const existing = threads.dms.find((t) =>
+      (t.participant_ids ?? []).includes(memberId)
+    );
+    if (existing) {
+      setActiveId(existing.id);
+      setNewDmOpen(false);
+      return;
+    }
+    const supabase = createClient();
+    const { data, error: createError } = await supabase
+      .from("chat_threads")
+      .insert({
+        client_id: clientId,
+        status: "active",
+        category: "dm",
+        chat_type: "dm",
+        participant_ids: [userId, memberId],
+        is_deletable: true,
+        created_by: userId,
+        last_message_at: new Date().toISOString(),
+      })
+      .select("*")
+      .single();
+    if (createError || !data) {
+      setError(createError?.message ?? "Couldn't start the conversation.");
+      return;
+    }
+    setThreads((prev) => ({ ...prev, dms: [data as ChatThread, ...prev.dms] }));
+    setActiveId(data.id);
+    setNewDmOpen(false);
+  }
+
+  const headerTitle = isWorkspace
+    ? "Bluejaypro Team"
+    : activeDm
+      ? (dmOther(activeDm)?.full_name ?? "Direct message")
+      : (activeGroup?.group_name ?? "Group chat");
+
   return (
-    <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden md:h-[calc(100vh-57px)]">
+    <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden">
       {/* Thread list */}
       <aside className="hidden w-[280px] shrink-0 flex-col border-r border-border sm:flex">
-        <div className="border-b border-border px-4 py-3.5">
-          <h1 className="text-base font-semibold tracking-tight">Chat</h1>
-          <p className="text-xs text-muted-foreground">
-            Your conversations with the team.
-          </p>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3.5">
+          <div>
+            <h1 className="text-base font-semibold tracking-tight">Chat</h1>
+            <p className="text-xs text-muted-foreground">Your conversations.</p>
+          </div>
+          <Button size="sm" onClick={() => setNewDmOpen(true)}>
+            <Plus className="size-4" /> New
+          </Button>
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           <p className="section-label px-2 pb-1 pt-1">Support</p>
@@ -176,59 +236,81 @@ export function PortalChat({
             onClick={() => setActiveId(thread.id)}
             className={cn(
               "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
-              isWorkspace
-                ? "bg-primary/10"
-                : "hover:bg-foreground/[0.04] dark:hover:bg-white/[0.03]"
+              isWorkspace ? "bg-primary/10" : "hover:bg-accent/60"
             )}
           >
             <span className="flex size-8 items-center justify-center rounded-full bg-primary/15">
               <Users className="size-4 text-primary" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">
-                Bluejaypro Team
-              </span>
+              <span className="block truncate text-sm font-medium">Bluejaypro Team</span>
               <span className="block truncate text-xs text-muted-foreground">
-                Workspace chat — always on
+                Workspace — always on
               </span>
             </span>
           </button>
 
-          {dmThreads.length > 0 && (
+          {threads.dms.length > 0 && (
             <>
               <p className="section-label px-2 pb-1 pt-4">Direct Messages</p>
-              {dmThreads.map((t) => {
-                const other = (t.participant_ids ?? [])
-                  .filter((id) => id !== userId)
-                  .map((id) => contactById[id])
-                  .find(Boolean);
+              {threads.dms.map((t) => {
+                const other = dmOther(t);
                 return (
                   <button
                     key={t.id}
                     onClick={() => setActiveId(t.id)}
                     className={cn(
                       "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
-                      activeId === t.id
-                        ? "bg-primary/10"
-                        : "hover:bg-foreground/[0.04] dark:hover:bg-white/[0.03]"
+                      activeId === t.id ? "bg-primary/10" : "hover:bg-accent/60"
                     )}
                   >
-                    <UserAvatar
-                      name={other?.full_name ?? "Team member"}
-                      avatarUrl={other?.avatar_url}
-                      className="size-8"
-                    />
+                    <span className="relative">
+                      <UserAvatar
+                        name={other?.full_name ?? "Team member"}
+                        avatarUrl={other?.avatar_url}
+                        className="size-8"
+                      />
+                      <PresenceDot online={isOnline(other?.last_seen)} />
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium">
                         {other?.full_name ?? "Team member"}
                       </span>
                       <span className="block truncate text-xs text-muted-foreground">
-                        Direct message
+                        {isOnline(other?.last_seen) ? "Online" : "Direct message"}
                       </span>
                     </span>
                   </button>
                 );
               })}
+            </>
+          )}
+
+          {threads.groups.length > 0 && (
+            <>
+              <p className="section-label px-2 pb-1 pt-4">Groups</p>
+              {threads.groups.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveId(t.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+                    activeId === t.id ? "bg-primary/10" : "hover:bg-accent/60"
+                  )}
+                >
+                  <span className="flex size-8 items-center justify-center rounded-full bg-muted">
+                    <Users className="size-4 text-muted-foreground" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">
+                      {t.group_name ?? "Group"}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {(t.participant_ids ?? []).length} members
+                    </span>
+                  </span>
+                </button>
+              ))}
             </>
           )}
         </div>
@@ -237,15 +319,13 @@ export function PortalChat({
       {/* Chat area */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold tracking-tight">
-            {isWorkspace
-              ? "Chat Support"
-              : (activeDmContact?.full_name ?? "Direct message")}
-          </h2>
+          <h2 className="text-lg font-semibold tracking-tight">{headerTitle}</h2>
           <p className="text-xs text-muted-foreground">
             {isWorkspace
-              ? "Your ongoing conversation with the Bluejaypro team — ticket updates appear here automatically."
-              : "Private conversation with your Bluejaypro contact."}
+              ? "Your ongoing conversation with the Bluejaypro team — ticket updates appear here."
+              : activeGroup
+                ? `${(activeGroup.participant_ids ?? []).length} members`
+                : "Private conversation with your Bluejaypro contact."}
           </p>
         </header>
 
@@ -290,6 +370,43 @@ export function PortalChat({
           </p>
         )}
       </div>
+
+      {/* New DM dialog */}
+      <Dialog open={newDmOpen} onOpenChange={setNewDmOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Message a team member</DialogTitle>
+            <DialogDescription>
+              Start a private conversation with someone on the Bluejaypro team.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-72 space-y-1 overflow-y-auto">
+            {team.length === 0 ? (
+              <p className="px-2 py-2 text-sm text-muted-foreground">
+                No team members available.
+              </p>
+            ) : (
+              team.map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => startDm(m.id)}
+                  className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent/60"
+                >
+                  <span className="relative">
+                    <UserAvatar
+                      name={m.full_name}
+                      avatarUrl={m.avatar_url}
+                      className="size-8"
+                    />
+                    <PresenceDot online={isOnline(m.last_seen)} />
+                  </span>
+                  <span className="text-sm font-medium">{m.full_name}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

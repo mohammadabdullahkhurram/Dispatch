@@ -52,6 +52,7 @@ export interface UserProfile {
   department_id: string | null;
   phone: string | null;
   ghl_contact_id: string | null;
+  last_seen: string | null;
   created_at: string;
 }
 
@@ -206,12 +207,24 @@ export interface TaskComment {
   user?: Pick<UserProfile, "id" | "full_name" | "avatar_url"> | null;
 }
 
+export type ChatType =
+  | "workspace"
+  | "dm"
+  | "group"
+  | "session"
+  | "internal_dm"
+  | "internal_group";
+
 export interface ChatThread {
   id: string;
   client_id: string | null; // null for internal team threads
   status: ThreadStatus;
-  category: string | null; // "workspace", "internal", "dm", or an issue category
+  chat_type: ChatType;
+  category: string | null; // legacy: "workspace"/"internal"/"dm" or issue category
   title: string | null;
+  group_name: string | null;
+  group_owner_id: string | null;
+  is_deletable: boolean;
   participant_ids: string[] | null;
   created_by: string | null;
   linked_ticket_id: string | null;

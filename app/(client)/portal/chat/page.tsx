@@ -29,7 +29,7 @@ export default async function PortalChatPage() {
     .from("chat_threads")
     .select("*")
     .eq("client_id", client.id)
-    .eq("category", "workspace")
+    .eq("chat_type", "workspace")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -37,7 +37,14 @@ export default async function PortalChatPage() {
   if (!thread) {
     const { data: created } = await supabase
       .from("chat_threads")
-      .insert({ client_id: client.id, status: "active", category: "workspace" })
+      .insert({
+        client_id: client.id,
+        status: "active",
+        category: "workspace",
+        chat_type: "workspace",
+        title: client.company_name,
+        is_deletable: false,
+      })
       .select("*")
       .single();
     thread = created;
@@ -53,37 +60,36 @@ export default async function PortalChatPage() {
     messages = (data ?? []) as ChatMessage[];
   }
 
-  // Direct messages this user is a participant of (RLS hides the rest).
-  const { data: dmThreads } = await supabase
+  // DMs + group chats this user participates in (RLS hides the rest;
+  // sessions are never returned to the portal).
+  const { data: sideThreads } = await supabase
     .from("chat_threads")
     .select("*")
-    .eq("category", "dm")
+    .in("chat_type", ["dm", "group"])
     .contains("participant_ids", [profile.id])
     .order("last_message_at", { ascending: false, nullsFirst: false });
 
-  // Resolve the team member on the other side of each DM for labels.
-  const dms = (dmThreads ?? []) as ChatThread[];
-  const otherIds = [
-    ...new Set(
-      dms
-        .flatMap((t) => t.participant_ids ?? [])
-        .filter((uid) => uid !== profile.id)
-    ),
-  ];
-  const { data: others } = otherIds.length
-    ? await supabase
-        .from("users")
-        .select("id, full_name, avatar_url")
-        .in("id", otherIds)
-    : { data: [] };
+  const side = (sideThreads ?? []) as ChatThread[];
+  const dms = side.filter((t) => t.chat_type === "dm");
+  const groups = side.filter((t) => t.chat_type === "group");
+
+  // The Dispatch team — for resolving DM/group names and for the
+  // "new DM" picker. (Clients may read team members per migration 011.)
+  const { data: team } = await supabase
+    .from("users")
+    .select("id, full_name, avatar_url, last_seen")
+    .neq("role", "client")
+    .order("full_name");
 
   return (
     <PortalChat
       userId={profile.id}
+      clientId={client.id}
       thread={thread as ChatThread}
       initialMessages={messages}
       dmThreads={dms}
-      dmContacts={others ?? []}
+      groupThreads={groups}
+      team={team ?? []}
     />
   );
 }
