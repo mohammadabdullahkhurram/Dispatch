@@ -93,6 +93,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // The client-insert trigger creates the workspace thread, but until
+  // migration 014's DDL is applied the trigger doesn't set chat_type,
+  // so it inherits the 013 default of 'session'. Force the auto-created
+  // workspace thread to the right type here so it shows in the
+  // Workspace section and the portal can find it. Idempotent once 014
+  // lands. See AUDIT.md Bug #1.
+  const { error: fixTypeError } = await admin
+    .from("chat_threads")
+    .update({ chat_type: "workspace", is_deletable: false })
+    .eq("client_id", client.id)
+    .eq("category", "workspace")
+    .neq("chat_type", "workspace");
+  if (fixTypeError) {
+    console.error("[clients] workspace chat_type fix failed:", fixTypeError.message);
+  }
+
   // Portal account for the primary contact — reuse an existing login,
   // otherwise create one with a 12-char temporary password.
   let warning: string | null = null;

@@ -8,8 +8,57 @@ import {
 } from "@/lib/ghl";
 
 /**
+ * Pull the plain-text SMS body out of whatever shape GHL sends. The
+ * message can arrive as a plain string, a nested object, or a
+ * stringified JSON like `{"type":2,"body":"hello"}` depending on how
+ * the GHL workflow's custom-webhook action is mapped — so dig for the
+ * text instead of trusting one field.
+ */
+function coerceText(v: unknown): string | null {
+  if (v == null) return null;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return coerceText(o.body ?? o.message ?? o.messageBody ?? o.text);
+  }
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!s) return null;
+  // A JSON-looking string: parse and dig, never store the raw JSON.
+  if (
+    (s.startsWith("{") && s.endsWith("}")) ||
+    (s.startsWith("[") && s.endsWith("]"))
+  ) {
+    try {
+      return coerceText(JSON.parse(s));
+    } catch {
+      return s; // looked like JSON but wasn't — treat as literal text
+    }
+  }
+  return s;
+}
+
+function extractSmsText(payload: Record<string, unknown>): string | null {
+  for (const key of ["message", "body", "messageBody", "text", "sms"]) {
+    const t = coerceText(payload[key]);
+    if (t) return t;
+  }
+  return null;
+}
+
+function extractPhone(payload: Record<string, unknown>): string | null {
+  for (const key of ["phone", "phoneNumber", "from", "number"]) {
+    const v = payload[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/**
  * GoHighLevel inbound SMS webhook.
- * Payload: { phone, message, contactId }
+ * Payload (field names vary by workflow): a phone (`phone`/`from`/…)
+ * and a message body (`message`/`body`/`messageBody`/… possibly nested
+ * or JSON-stringified) plus an optional `contactId`.
  *
  * Flow: verify the contact carries the "dispatch-user" tag in GHL →
  * match the sender to a client by phone → find or create their active
@@ -17,18 +66,29 @@ import {
  * metadata.source: "sms") so it shows up live in the team chat.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => null)) as {
-    phone?: string;
-    message?: string;
-    contactId?: string;
-  } | null;
+  const raw = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
 
-  if (!payload?.phone || !payload.message) {
+  // Log exactly what GHL sent so the field mapping is verifiable.
+  console.log("[ghl-sms] payload:", JSON.stringify(raw));
+
+  const phone = raw ? extractPhone(raw) : null;
+  const message = raw ? extractSmsText(raw) : null;
+  const contactId =
+    typeof raw?.contactId === "string" ? raw.contactId : undefined;
+
+  if (!phone || !message) {
+    console.warn(
+      `[ghl-sms] could not extract phone/message (phone=${!!phone}, message=${!!message})`
+    );
     return NextResponse.json(
-      { error: "Expected { phone, message, contactId }" },
+      { error: "Expected a phone and a message body" },
       { status: 400 }
     );
   }
+  const payload = { phone, message, contactId };
 
   // Gate: only contacts explicitly tagged "dispatch-user" in GHL ever
   // reach Dispatch chat. Tag-check failures fail closed.
