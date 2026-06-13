@@ -29,7 +29,7 @@ A typical flow: a client texts the support number → GHL's workflow posts to Di
 ```
 dispatch/
 ├── proxy.ts                     # Auth + role-based routing (Next 16's middleware)
-├── vercel.json                  # Cron: /api/cron/notifications every 15 min
+├── vercel.json                  # Cron: /api/cron/notifications daily (Hobby-plan limit)
 ├── app/
 │   ├── (auth)/
 │   │   ├── login/               # Split-screen login (animated brand panel) + forgot password
@@ -171,7 +171,7 @@ Sessions are the only SMS-bridged type: a team reply mirrors out as SMS when the
 ### Notifications
 - ✅ Realtime bell + full notifications page (type filters, mark-all-read, click-to-navigate)
 - ✅ **Event triggers (DB-level, all creation paths):** `ticket_assigned` (assignee), `ticket_escalated` (department head, owner/admin fallback), `ticket_resolved` (creator, portal link for clients), `new_chat_message` (client messages → team; DMs → team participants only), plus the existing phone-ticket department-head notification
-- ✅ **Time-based triggers:** `sla_breach` (assignee + department head), `task_due_soon` (assignee, 24h ahead), `task_overdue` (assignee + department head) — deduped per entity+user, run by Vercel cron every 15 min and on dashboard page loads as backstop
+- ✅ **Time-based triggers:** `sla_breach` (assignee + department head), `task_due_soon` (assignee, 24h ahead), `task_overdue` (assignee + department head) — deduped per entity+user, run by a daily Vercel cron (Hobby plan caps crons at once/day; bump to `*/15 * * * *` on Pro) and on every dashboard page load as the primary backstop
 - ❌ Email notifications for in-app events (transactional email exists for invites/onboarding only)
 
 ### Settings
