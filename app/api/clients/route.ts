@@ -16,6 +16,10 @@ import { isTeamRole, type UserRole } from "@/lib/types";
  * email through GHL — the email path the dialog-only insert never had.
  */
 export async function POST(request: NextRequest) {
+  // First line in the handler — if this isn't in the logs, the request
+  // never reached this route (stale deploy, wrong path, or server action).
+  console.error("CLIENT CREATION STARTED", new Date().toISOString());
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -92,6 +96,7 @@ export async function POST(request: NextRequest) {
   // Portal account for the primary contact — reuse an existing login,
   // otherwise create one with a 12-char temporary password.
   let warning: string | null = null;
+  let emailError: string | null = null;
   let userId: string | null = null;
   let tempPassword: string | null = null;
 
@@ -165,12 +170,19 @@ export async function POST(request: NextRequest) {
       console.log(`[clients][debug] sendEmail result: ${JSON.stringify(sent)}`);
       if (!sent.ok) {
         console.error("[clients][debug] sendEmail error:", sent.error);
+        // Surface the real reason, don't swallow it — it travels back in
+        // the API response (emailError) so it's visible in the Network
+        // tab and Vercel logs.
+        emailError = sent.error ?? "Unknown sendEmail failure";
         warning = warning ?? `Client created, but the onboarding email failed: ${sent.error}`;
       } else {
         console.log(`[clients] onboarding email sent to ${email}`);
       }
     } catch (error) {
-      console.error("[clients] onboarding email threw:", error);
+      const message =
+        error instanceof Error ? error.message : "Unknown sendEmail exception";
+      console.error("[clients] onboarding email threw:", message);
+      emailError = message;
       warning = warning ?? "Client created, but the onboarding email failed.";
     }
   }
@@ -187,5 +199,8 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  return NextResponse.json({ client, warning });
+  console.error(
+    `CLIENT CREATION FINISHED ${client.id} — emailError=${emailError ?? "none"}`
+  );
+  return NextResponse.json({ client, warning, emailError });
 }
