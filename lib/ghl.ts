@@ -66,6 +66,7 @@ export async function testGhlConnection(): Promise<{
 export interface GhlContact {
   id: string;
   tags: string[];
+  email?: string | null;
 }
 
 /** Search contacts in our location by any query (phone, email, name). */
@@ -84,10 +85,34 @@ async function searchContacts(query: string): Promise<GhlContact | null> {
   }
 
   const data = (await res.json()) as {
-    contacts?: Array<{ id: string; tags?: string[] }>;
+    contacts?: Array<{ id: string; tags?: string[]; email?: string | null }>;
   };
   const contact = data.contacts?.[0];
-  return contact ? { id: contact.id, tags: contact.tags ?? [] } : null;
+  return contact
+    ? { id: contact.id, tags: contact.tags ?? [], email: contact.email ?? null }
+    : null;
+}
+
+/**
+ * Ensure a contact has an email on record. GHL's email send rejects
+ * with 400 "Contact has no email" when the contact record lacks one
+ * (e.g. a phone-only lead created from SMS), even if emailTo is set.
+ */
+export async function ensureContactEmail(
+  contactId: string,
+  email: string
+): Promise<boolean> {
+  const res = await fetch(`${GHL_API_BASE}/contacts/${contactId}`, {
+    method: "PUT",
+    headers: ghlHeaders(),
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    console.error(
+      `[ghl-email] could not set email on contact ${contactId}: ${res.status}`
+    );
+  }
+  return res.ok;
 }
 
 /** Find a GHL contact by phone number. */
@@ -136,8 +161,12 @@ export async function createGhlContact(input: {
     return null;
   }
 
-  const data = (await res.json()) as { contact?: { id: string } };
-  return data.contact ? { id: data.contact.id, tags: [] } : null;
+  const data = (await res.json()) as {
+    contact?: { id: string; email?: string | null };
+  };
+  return data.contact
+    ? { id: data.contact.id, tags: [], email: data.contact.email ?? input.email ?? null }
+    : null;
 }
 
 /** Return the tags on a GHL contact. */
@@ -217,6 +246,16 @@ export async function sendEmail(
   if (!contact) {
     console.error(`[ghl-email] could not find or create a contact for ${to}`);
     return { ok: false, error: `No GHL contact found or created for ${to}` };
+  }
+
+  // GHL rejects the send (400 "Contact has no email") unless the
+  // contact record itself carries the address — a phone-only lead
+  // (e.g. created from inbound SMS) won't. Backfill it before sending.
+  if (!contact.email || contact.email.toLowerCase() !== to.toLowerCase()) {
+    console.log(
+      `[ghl-email] contact ${contact.id} email on record = ${contact.email ?? "(none)"}; setting to ${to}`
+    );
+    await ensureContactEmail(contact.id, to);
   }
 
   console.log(

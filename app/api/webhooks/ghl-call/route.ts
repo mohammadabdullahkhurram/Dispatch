@@ -7,13 +7,13 @@ import type { Priority, TicketCategory } from "@/lib/types";
 
 /**
  * GoHighLevel call webhook. GHL runs the IVR, voice AI, transcription,
- * and AI summarization — we receive the finished artifacts:
- * { caller_phone, recording_url, transcript, ai_summary, ivr_selection,
- *   duration, timestamp }
+ * and AI summarization — we receive the finished artifacts. Field names
+ * vary by how the GHL workflow's custom-webhook action is mapped, so we
+ * accept several aliases for each value and use whatever is present.
  *
- * Flow: map IVR digit → category → match client by phone → create a
- * phone-sourced ticket with GHL's summary → drop a ticket card in the
- * client's chat thread → notify the department head.
+ * Flow: resolve category → match client by phone → create a
+ * phone-sourced ticket with GHL's summary → open a session with a
+ * call_log → notify the department head.
  */
 
 const IVR_CATEGORIES: Record<string, TicketCategory> = {
@@ -23,47 +23,102 @@ const IVR_CATEGORIES: Record<string, TicketCategory> = {
   "4": "billing",
   "5": "general",
 };
+const VALID_CATEGORIES: TicketCategory[] = [
+  "seo",
+  "ghl",
+  "software",
+  "billing",
+  "general",
+];
 
+/** First non-empty string among the candidates. */
+function pick(...vals: unknown[]): string | null {
+  for (const v of vals) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+/** Map an IVR digit or a category name to a valid category. */
+function resolveCategory(raw: string | null): TicketCategory {
+  if (!raw) return "general";
+  if (IVR_CATEGORIES[raw]) return IVR_CATEGORIES[raw];
+  const lower = raw.toLowerCase();
+  return (VALID_CATEGORIES as string[]).includes(lower)
+    ? (lower as TicketCategory)
+    : "general";
+}
 
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => null)) as {
-    caller_phone?: string;
-    recording_url?: string;
-    transcript?: string;
-    ai_summary?: string;
-    ivr_selection?: string | number;
-    duration?: number;
-    timestamp?: string;
-  } | null;
+  const body = (await request.json().catch(() => null)) as Record<
+    string,
+    unknown
+  > | null;
 
-  if (!payload?.caller_phone) {
-    return NextResponse.json(
-      { error: "Expected { caller_phone, recording_url, transcript, ai_summary, ivr_selection, duration, timestamp }" },
-      { status: 400 }
-    );
+  // Log the exact payload so the GHL field mapping is verifiable.
+  console.error("GHL CALL PAYLOAD:", JSON.stringify(body));
+
+  const contact = (body?.contact ?? {}) as Record<string, unknown>;
+
+  const callerPhone = pick(
+    body?.caller_phone,
+    body?.phone,
+    contact.phone,
+    body?.contactPhone
+  );
+  const recordingUrl = pick(
+    body?.recording_url,
+    body?.recordingUrl,
+    body?.call_recording_url,
+    body?.recordingURL
+  );
+  const transcript =
+    pick(
+      body?.transcript,
+      body?.call_transcript,
+      body?.body,
+      body?.messageBody
+    ) ?? "";
+  const durationStr = pick(
+    body?.duration,
+    body?.call_duration,
+    body?.callDuration
+  );
+  const categoryRaw = pick(
+    body?.ivr_selection,
+    body?.current_issue_category,
+    contact.current_issue_category
+  );
+  const aiSummary = pick(body?.ai_summary, body?.summary);
+  const timestamp = pick(body?.timestamp, body?.date_created, body?.dateAdded);
+
+  // Without a phone we can't attribute the call to a client — ack so
+  // GHL doesn't retry-storm, but don't 400.
+  if (!callerPhone) {
+    console.warn("[ghl-call] no caller phone in payload — skipping");
+    return NextResponse.json({ received: true, matched: false });
   }
 
   const supabase = createAdminClient();
 
-  const client = await findClientByPhone(supabase, payload.caller_phone);
+  const client = await findClientByPhone(supabase, callerPhone);
   if (!client) {
-    console.warn(`[ghl-call] No client matches phone ${payload.caller_phone}`);
+    console.warn(`[ghl-call] No client matches phone ${callerPhone}`);
     return NextResponse.json({ received: true, matched: false });
   }
 
-  const category =
-    IVR_CATEGORIES[String(payload.ivr_selection ?? "")] ?? "general";
+  const category = resolveCategory(categoryRaw);
   const priority: Priority = "medium";
-  const transcript = payload.transcript?.trim() ?? "";
-  const aiSummary = payload.ai_summary?.trim() || null;
 
   // GHL's AI summary is the ticket description; fall back to the first
-  // 500 characters of the transcript when it's missing.
+  // 500 characters of the transcript, or a placeholder when neither is
+  // present.
   const summary =
     aiSummary ??
     (transcript
       ? `${transcript.slice(0, 500)}${transcript.length > 500 ? "…" : ""}`
-      : "Voice call received — no transcript available.");
+      : "No transcript available");
 
   const title = `Phone call from ${client.company_name} (${category.toUpperCase()})`;
 
@@ -88,11 +143,11 @@ export async function POST(request: NextRequest) {
       source: "phone",
       client_id: client.id,
       department_id: matchedDepartment?.id ?? null,
-      voice_recording_url: payload.recording_url ?? null,
+      voice_recording_url: recordingUrl,
       transcription: transcript || null,
       ai_summary: aiSummary,
       sla_deadline: slaDeadline(priority),
-      created_at: payload.timestamp ?? undefined,
+      created_at: timestamp ?? undefined,
     })
     .select("id, title, status")
     .single();
@@ -120,8 +175,7 @@ export async function POST(request: NextRequest) {
           phone: string | null;
         } | null;
       })
-      .find((u) => u && phonesMatch(u.phone, payload.caller_phone!))?.id ??
-    null;
+      .find((u) => u && phonesMatch(u.phone, callerPhone))?.id ?? null;
 
   // Each call opens a fresh support session linked to its ticket (it
   // auto-closes when the ticket resolves), seeded with a call_log
@@ -133,6 +187,7 @@ export async function POST(request: NextRequest) {
       client_id: client.id,
       status: "active",
       category,
+      chat_type: "session",
       linked_ticket_id: ticket.id,
       point_of_contact_id: pocId,
       last_message_at: new Date().toISOString(),
@@ -140,8 +195,7 @@ export async function POST(request: NextRequest) {
     .select("id")
     .single();
 
-  const duration =
-    payload.duration != null ? Number(payload.duration) : null;
+  const duration = durationStr != null ? Number(durationStr) : null;
 
   await Promise.all([
     session
@@ -159,8 +213,8 @@ export async function POST(request: NextRequest) {
             direction: "inbound",
             status: "completed",
             duration,
-            recording_url: payload.recording_url ?? null,
-            phone: payload.caller_phone,
+            recording_url: recordingUrl,
+            phone: callerPhone,
           },
         })
       : Promise.resolve(),
@@ -178,9 +232,9 @@ export async function POST(request: NextRequest) {
       details: {
         source: "phone",
         client_id: client.id,
-        ivr_selection: payload.ivr_selection ?? null,
+        ivr_selection: categoryRaw,
         has_ai_summary: !!aiSummary,
-        duration: payload.duration ?? null,
+        duration: durationStr,
       },
     }),
     notifyDepartmentHead(supabase, matchedDepartment?.id ?? null, {
