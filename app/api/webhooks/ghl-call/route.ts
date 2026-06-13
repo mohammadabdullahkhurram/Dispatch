@@ -50,6 +50,24 @@ function resolveCategory(raw: string | null): TicketCategory {
     : "general";
 }
 
+/** Phone tickets default to medium; bump if the summary signals urgency. */
+function priorityFromSummary(summary: string | null): Priority {
+  if (!summary) return "medium";
+  const t = summary.toLowerCase();
+  if (/\b(urgent|emergency|asap|critical|immediately|down|outage)\b/.test(t))
+    return "urgent";
+  if (/\b(high priority|high-priority|important|escalat)\b/.test(t))
+    return "high";
+  if (/\b(low priority|whenever|no rush|not urgent)\b/.test(t)) return "low";
+  return "medium";
+}
+
+/** First sentence of the AI summary, trimmed to a ticket-title length. */
+function summaryToTitle(summary: string): string {
+  const first = summary.split(/(?<=[.!?])\s/)[0]?.trim() || summary.trim();
+  return first.length > 90 ? `${first.slice(0, 87)}…` : first;
+}
+
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as Record<
     string,
@@ -109,18 +127,20 @@ export async function POST(request: NextRequest) {
   }
 
   const category = resolveCategory(categoryRaw);
-  const priority: Priority = "medium";
+  const priority = priorityFromSummary(aiSummary);
 
-  // GHL's AI summary is the ticket description; fall back to the first
-  // 500 characters of the transcript, or a placeholder when neither is
-  // present.
-  const summary =
-    aiSummary ??
-    (transcript
-      ? `${transcript.slice(0, 500)}${transcript.length > 500 ? "…" : ""}`
-      : "No transcript available");
+  // Title from the AI summary when present, else a dated label.
+  const callDate = timestamp ? new Date(timestamp) : new Date();
+  const dateLabel = Number.isNaN(callDate.getTime())
+    ? new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : callDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const title = aiSummary
+    ? summaryToTitle(aiSummary)
+    : `Support Call - ${category.toUpperCase()} - ${dateLabel}`;
 
-  const title = `Phone call from ${client.company_name} (${category.toUpperCase()})`;
+  // Description is the full transcript; the AI summary lives in its own
+  // field. Placeholder when GHL hasn't sent a transcript (no AI step).
+  const description = transcript || "No transcript available";
 
   // Tickets route to departments per issue, not per client: match a
   // department whose name contains the ticket category (e.g. "SEO",
@@ -136,7 +156,7 @@ export async function POST(request: NextRequest) {
     .from("tickets")
     .insert({
       title,
-      description: summary,
+      description,
       category,
       priority,
       status: "open",
@@ -164,18 +184,22 @@ export async function POST(request: NextRequest) {
   // phone matches someone on the client's roster.
   const { data: roster } = await supabase
     .from("client_users")
-    .select("user:users(id, phone)")
+    .select("user:users(id, full_name, phone)")
     .eq("client_id", client.id);
-  const pocId =
-    (roster ?? [])
-      .map((row) => {
-        const rel = row.user as unknown;
-        return (Array.isArray(rel) ? rel[0] : rel) as {
-          id: string;
-          phone: string | null;
-        } | null;
-      })
-      .find((u) => u && phonesMatch(u.phone, callerPhone))?.id ?? null;
+  const pocMatch = (roster ?? [])
+    .map((row) => {
+      const rel = row.user as unknown;
+      return (Array.isArray(rel) ? rel[0] : rel) as {
+        id: string;
+        full_name: string | null;
+        phone: string | null;
+      } | null;
+    })
+    .find((u) => u && phonesMatch(u.phone, callerPhone));
+  const pocId = pocMatch?.id ?? null;
+  // Display name for the call_log: matched roster member, else the
+  // client's primary contact.
+  const callerName = pocMatch?.full_name ?? client.contact_name ?? null;
 
   // Each call opens a fresh support session linked to its ticket (it
   // auto-closes when the ticket resolves), seeded with a call_log
@@ -204,7 +228,7 @@ export async function POST(request: NextRequest) {
           sender_id: pocId,
           sender_type: "client",
           content:
-            `Inbound call` +
+            `Inbound call from ${callerName ?? callerPhone}` +
             (duration != null && !Number.isNaN(duration)
               ? ` · ${formatDuration(duration)}`
               : ""),
@@ -212,9 +236,14 @@ export async function POST(request: NextRequest) {
           metadata: {
             direction: "inbound",
             status: "completed",
+            caller_name: callerName,
+            phone: callerPhone,
             duration,
             recording_url: recordingUrl,
-            phone: callerPhone,
+            transcript: transcript || null,
+            ai_summary: aiSummary,
+            ticket_id: ticket.id,
+            category,
           },
         })
       : Promise.resolve(),

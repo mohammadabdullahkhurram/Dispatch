@@ -1,12 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Bot, Phone, Ticket as TicketIcon, Video } from "lucide-react";
-import { TicketStatusBadge } from "@/components/badges";
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Phone,
+  Sparkles,
+  Ticket as TicketIcon,
+  Video,
+} from "lucide-react";
+import { CategoryBadge, TicketStatusBadge } from "@/components/badges";
 import { UserAvatar } from "@/components/user-avatar";
 import { formatDateTime, formatDuration } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { ChatMessage, TicketStatus } from "@/lib/types";
+import type { ChatMessage, TicketCategory, TicketStatus } from "@/lib/types";
 
 /**
  * Renders one chat message. `viewer` decides which side "mine" is:
@@ -35,6 +44,11 @@ export function MessageBubble({
     status?: string;
     duration?: number | null;
     recording_url?: string | null;
+    caller_name?: string | null;
+    phone?: string | null;
+    transcript?: string | null;
+    ai_summary?: string | null;
+    category?: TicketCategory | null;
   };
 
   // Rich cards (anything that isn't a plain text message) stretch to
@@ -76,28 +90,7 @@ export function MessageBubble({
       break;
 
     case "call_log":
-      body = (
-        <div className="w-full space-y-1.5 rounded-lg border border-border bg-card p-3">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Phone className="size-3.5 text-primary" />
-            {meta.direction === "inbound" ? "Inbound call" : "Outbound call"}
-            {meta.status ? ` · ${meta.status}` : ""}
-          </div>
-          {message.content && <p className="text-sm">{message.content}</p>}
-          {meta.duration != null && (
-            <p className="text-xs text-muted-foreground">
-              Duration: {formatDuration(meta.duration)}
-            </p>
-          )}
-          {meta.recording_url && (
-            <audio
-              controls
-              src={meta.recording_url}
-              className="h-9 w-full"
-            />
-          )}
-        </div>
-      );
+      body = <CallLogCard meta={meta} ticketHrefBase={ticketHrefBase} />;
       break;
 
     case "meet_link":
@@ -174,6 +167,114 @@ export function MessageBubble({
           {formatDateTime(message.sent_at)}
         </p>
       </div>
+    </div>
+  );
+}
+
+const TRANSCRIPT_COLLAPSE_AT = 280;
+
+/** Rich inbound-call card: caller, duration, recording, AI summary,
+ *  expandable transcript, category, and a link to the created ticket. */
+function CallLogCard({
+  meta,
+  ticketHrefBase,
+}: {
+  meta: {
+    direction?: string;
+    status?: string;
+    caller_name?: string | null;
+    phone?: string | null;
+    duration?: number | null;
+    recording_url?: string | null;
+    transcript?: string | null;
+    ai_summary?: string | null;
+    category?: TicketCategory | null;
+    ticket_id?: string;
+  };
+  ticketHrefBase: string;
+}) {
+  const transcript = meta.transcript ?? "";
+  const isLong = transcript.length > TRANSCRIPT_COLLAPSE_AT;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="w-full space-y-2.5 rounded-lg border border-border bg-card p-3">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+          <Phone className="size-4 shrink-0 text-primary" />
+          <span className="truncate">
+            {meta.direction === "outbound" ? "Outbound call" : "Inbound call"}
+            {meta.caller_name ? ` · ${meta.caller_name}` : ""}
+          </span>
+        </div>
+        {meta.category && <CategoryBadge category={meta.category} />}
+      </div>
+
+      {/* Caller + duration line */}
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+        {meta.phone && <span>{meta.phone}</span>}
+        {meta.duration != null && !Number.isNaN(meta.duration) && (
+          <span>Duration: {formatDuration(meta.duration)}</span>
+        )}
+        {meta.status && <span className="capitalize">{meta.status}</span>}
+      </div>
+
+      {/* Recording */}
+      {meta.recording_url ? (
+        <audio controls src={meta.recording_url} className="h-9 w-full" />
+      ) : (
+        <p className="text-xs text-muted-foreground">No recording available.</p>
+      )}
+
+      {/* AI summary */}
+      {meta.ai_summary && (
+        <div className="rounded-md border border-primary/30 bg-primary/10 p-2.5">
+          <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-primary">
+            <Sparkles className="size-3" /> AI summary
+          </p>
+          <p className="text-sm">{meta.ai_summary}</p>
+        </div>
+      )}
+
+      {/* Transcript (collapsible when long) */}
+      {transcript ? (
+        <div>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            disabled={!isLong}
+          >
+            {isLong &&
+              (open ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              ))}
+            Transcript
+          </button>
+          <p
+            className={cn(
+              "mt-1 whitespace-pre-wrap text-sm text-secondary-foreground",
+              isLong && !open && "line-clamp-3"
+            )}
+          >
+            {transcript}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">No transcript available.</p>
+      )}
+
+      {/* Ticket link */}
+      {meta.ticket_id && (
+        <Link
+          href={ticketHrefBase}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
+        >
+          <TicketIcon className="size-3.5" /> View ticket
+        </Link>
+      )}
     </div>
   );
 }
