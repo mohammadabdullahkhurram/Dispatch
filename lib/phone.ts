@@ -43,7 +43,8 @@ export async function findClientByPhone(
 export async function findContactUser(
   supabase: SupabaseClient,
   clientId: string,
-  phone: string
+  phone: string,
+  name?: string | null
 ): Promise<{ id: string; full_name: string | null } | null> {
   const { data } = await supabase
     .from("client_users")
@@ -61,11 +62,22 @@ export async function findContactUser(
     })
     .filter((u): u is { id: string; full_name: string | null; phone: string | null } => !!u);
 
-  const match = members.find((u) => phonesMatch(u.phone, phone));
+  // Primary: phone. Secondary: the name GHL gave us (roster members
+  // often have no phone on file). Case/space-insensitive.
+  let match = members.find((u) => phonesMatch(u.phone, phone));
+  let via = "phone";
+  if (!match && name?.trim()) {
+    const target = name.trim().toLowerCase();
+    match = members.find(
+      (u) => (u.full_name ?? "").trim().toLowerCase() === target
+    );
+    if (match) via = "name";
+  }
+
   console.log(
-    `[poc-lookup] client=${clientId} caller=${phone} ` +
+    `[poc-lookup] client=${clientId} caller=${phone} name=${name ?? "(none)"} ` +
       `roster=${JSON.stringify(members.map((m) => ({ name: m.full_name, phone: m.phone })))} ` +
-      `→ ${match ? `${match.full_name} (${match.id})` : "NO MATCH"}`
+      `→ ${match ? `${match.full_name} (${match.id}) via ${via}` : "NO MATCH"}`
   );
   return match ? { id: match.id, full_name: match.full_name } : null;
 }

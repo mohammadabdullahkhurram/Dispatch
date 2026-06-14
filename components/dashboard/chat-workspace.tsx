@@ -202,15 +202,16 @@ export function ChatWorkspace({
         return (other && dir[other]?.full_name) || "Direct message";
       }
       default: {
-        // Session: "[Contact] · [Company]" from the matched client user.
-        // No match → "Caller" for call sessions (they link a ticket),
-        // "SMS" for text sessions.
+        // Session: "[Contact] · [Company]". Prefer the matched client
+        // user; else the name the webhook stored on the thread (from the
+        // GHL payload); else "Caller" (calls link a ticket) / "SMS".
         const company = thread.client?.company_name ?? "Client";
         const contact =
           thread.poc?.full_name ??
           (thread.point_of_contact_id
             ? dir[thread.point_of_contact_id]?.full_name
             : null) ??
+          thread.title ??
           (thread.linked_ticket_id ? "Caller" : "SMS");
         return `${contact} · ${company}`;
       }

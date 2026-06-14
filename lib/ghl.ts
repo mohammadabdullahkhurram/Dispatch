@@ -169,6 +169,25 @@ export async function createGhlContact(input: {
     : null;
 }
 
+/**
+ * Fetch the full GHL contact record (including custom fields). Used to
+ * backfill a call's recording/transcript when the webhook fired before
+ * GHL finished processing them.
+ */
+export async function getGhlContact(
+  contactId: string
+): Promise<Record<string, unknown> | null> {
+  const res = await fetch(`${GHL_API_BASE}/contacts/${contactId}`, {
+    headers: ghlHeaders(),
+  });
+  if (!res.ok) {
+    console.error(`[ghl] contact fetch failed: ${res.status}`);
+    return null;
+  }
+  const data = (await res.json()) as { contact?: Record<string, unknown> };
+  return data.contact ?? null;
+}
+
 /** Return the tags on a GHL contact. */
 export async function getContactTags(contactId: string): Promise<string[]> {
   const res = await fetch(`${GHL_API_BASE}/contacts/${contactId}`, {

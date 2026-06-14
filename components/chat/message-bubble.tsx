@@ -271,7 +271,9 @@ function CallLogCard({
         {meta.recording_url ? (
           <audio controls src={meta.recording_url} className="h-9 w-full" />
         ) : (
-          <Processing />
+          <p className="text-xs text-muted-foreground">
+            Recording not available for this call
+          </p>
         )}
       </div>
 

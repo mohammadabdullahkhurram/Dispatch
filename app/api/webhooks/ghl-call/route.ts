@@ -1,9 +1,19 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findClientByPhone, findContactUser } from "@/lib/phone";
+import { getGhlContact } from "@/lib/ghl";
+import {
+  deepFindField,
+  extractCallArtifacts,
+  extractCallerName,
+  pick,
+  priorityFromSummary,
+  resolveCategory,
+  summaryToTitle,
+} from "@/lib/ghl-call";
 import { slaDeadline } from "@/lib/sla";
 import { formatDuration } from "@/lib/format";
-import type { Priority, TicketCategory } from "@/lib/types";
+import type { Priority } from "@/lib/types";
 
 /**
  * GoHighLevel call webhook. GHL runs the IVR, voice AI, transcription,
@@ -12,104 +22,14 @@ import type { Priority, TicketCategory } from "@/lib/types";
  * accept several aliases for each value and use whatever is present.
  *
  * Flow: resolve category → match client by phone → create a
- * phone-sourced ticket with GHL's summary → open a session with a
- * call_log → notify the department head.
+ * phone-sourced ticket → open a session with a call_log → notify the
+ * department head. When recording/transcript are missing (the webhook
+ * can fire before GHL finishes processing), schedule a retry that
+ * re-fetches them from the GHL contact and patches the ticket + message.
  */
 
-const IVR_CATEGORIES: Record<string, TicketCategory> = {
-  "1": "seo",
-  "2": "ghl",
-  "3": "software",
-  "4": "billing",
-  "5": "general",
-};
-const VALID_CATEGORIES: TicketCategory[] = [
-  "seo",
-  "ghl",
-  "software",
-  "billing",
-  "general",
-];
-
-/** First non-empty string among the candidates. */
-function pick(...vals: unknown[]): string | null {
-  for (const v of vals) {
-    if (typeof v === "string" && v.trim()) return v.trim();
-    if (typeof v === "number") return String(v);
-  }
-  return null;
-}
-
-/**
- * GHL custom fields arrive in inconsistent shapes depending on workflow
- * config: a top-level key, nested under `contact`/`customData`, or as a
- * customField array of { id|key|name, value }. The key casing/spacing
- * also varies ("current_issue_category", "Current Issue Category", …).
- * Recursively hunt for a key matching `re` and return its value.
- */
-function deepFindField(obj: unknown, re: RegExp, depth = 0): string | null {
-  if (!obj || depth > 5) return null;
-  if (Array.isArray(obj)) {
-    for (const item of obj) {
-      if (item && typeof item === "object") {
-        const o = item as Record<string, unknown>;
-        const keyish = String(o.key ?? o.name ?? o.id ?? "");
-        if (re.test(keyish)) {
-          const v = o.value ?? o.field_value ?? o.fieldValue;
-          if ((typeof v === "string" || typeof v === "number") && String(v).trim())
-            return String(v).trim();
-        }
-      }
-      const nested = deepFindField(item, re, depth + 1);
-      if (nested) return nested;
-    }
-    return null;
-  }
-  if (typeof obj === "object") {
-    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (
-        re.test(k) &&
-        (typeof v === "string" || typeof v === "number") &&
-        String(v).trim()
-      ) {
-        return String(v).trim();
-      }
-      if (v && typeof v === "object") {
-        const nested = deepFindField(v, re, depth + 1);
-        if (nested) return nested;
-      }
-    }
-  }
-  return null;
-}
-
-/** Map an IVR digit or a category name to a valid category. */
-function resolveCategory(raw: string | null): TicketCategory {
-  if (!raw) return "general";
-  if (IVR_CATEGORIES[raw]) return IVR_CATEGORIES[raw];
-  const lower = raw.toLowerCase();
-  return (VALID_CATEGORIES as string[]).includes(lower)
-    ? (lower as TicketCategory)
-    : "general";
-}
-
-/** Phone tickets default to medium; bump if the summary signals urgency. */
-function priorityFromSummary(summary: string | null): Priority {
-  if (!summary) return "medium";
-  const t = summary.toLowerCase();
-  if (/\b(urgent|emergency|asap|critical|immediately|down|outage)\b/.test(t))
-    return "urgent";
-  if (/\b(high priority|high-priority|important|escalat)\b/.test(t))
-    return "high";
-  if (/\b(low priority|whenever|no rush|not urgent)\b/.test(t)) return "low";
-  return "medium";
-}
-
-/** First sentence of the AI summary, trimmed to a ticket-title length. */
-function summaryToTitle(summary: string): string {
-  const first = summary.split(/(?<=[.!?])\s/)[0]?.trim() || summary.trim();
-  return first.length > 90 ? `${first.slice(0, 87)}…` : first;
-}
+// Allow the after() retry-scheduler a window to run (Hobby caps at 60s).
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as Record<
@@ -121,6 +41,7 @@ export async function POST(request: NextRequest) {
   console.error("GHL CALL PAYLOAD:", JSON.stringify(body));
 
   const contact = (body?.contact ?? {}) as Record<string, unknown>;
+  const contactId = pick(body?.contactId, body?.contact_id, contact.id);
 
   const callerPhone = pick(
     body?.caller_phone,
@@ -128,19 +49,9 @@ export async function POST(request: NextRequest) {
     contact.phone,
     body?.contactPhone
   );
-  const recordingUrl = pick(
-    body?.recording_url,
-    body?.recordingUrl,
-    body?.call_recording_url,
-    body?.recordingURL
+  let { recordingUrl, transcript, aiSummary } = extractCallArtifacts(
+    body ?? {}
   );
-  const transcript =
-    pick(
-      body?.transcript,
-      body?.call_transcript,
-      body?.body,
-      body?.messageBody
-    ) ?? "";
   const durationStr = pick(
     body?.duration,
     body?.call_duration,
@@ -156,8 +67,8 @@ export async function POST(request: NextRequest) {
     // Last resort: scan the whole payload for the IVR custom field
     // regardless of where/how GHL nested or cased it.
     (body ? deepFindField(body, /current[_\s-]?issue[_\s-]?category/i) : null);
-  const aiSummary = pick(body?.ai_summary, body?.summary);
   const timestamp = pick(body?.timestamp, body?.date_created, body?.dateAdded);
+  const ghlCallerName = body ? extractCallerName(body) : null;
 
   // Without a phone we can't attribute the call to a client — ack so
   // GHL doesn't retry-storm, but don't 400.
@@ -172,6 +83,23 @@ export async function POST(request: NextRequest) {
   if (!client) {
     console.warn(`[ghl-call] No client matches phone ${callerPhone}`);
     return NextResponse.json({ received: true, matched: false });
+  }
+
+  // If GHL fired before processing finished, recording/transcript may be
+  // absent from the webhook body — try the contact record now as a cheap
+  // first backfill (a delayed retry below covers the slower cases).
+  if (contactId && (!recordingUrl || !transcript)) {
+    try {
+      const fresh = await getGhlContact(contactId);
+      if (fresh) {
+        const art = extractCallArtifacts(fresh);
+        recordingUrl = recordingUrl ?? art.recordingUrl;
+        if (!transcript) transcript = art.transcript;
+        aiSummary = aiSummary ?? art.aiSummary;
+      }
+    } catch (e) {
+      console.error("[ghl-call] contact backfill failed:", e);
+    }
   }
 
   const category = resolveCategory(categoryRaw);
@@ -231,13 +159,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // The caller becomes the session's point of contact when their
-  // phone matches someone on the client's roster.
-  const pocMatch = await findContactUser(supabase, client.id, callerPhone);
+  // Point of contact: match by phone, then by the GHL-provided name.
+  const pocMatch = await findContactUser(
+    supabase,
+    client.id,
+    callerPhone,
+    ghlCallerName
+  );
   const pocId = pocMatch?.id ?? null;
-  // Display name for the call_log: matched roster member, else the
-  // client's primary contact, else "Caller".
-  const callerName = pocMatch?.full_name ?? client.contact_name ?? "Caller";
+  // Display name: matched roster member → GHL contact name → client
+  // primary contact → "Caller". Stored as the thread title so the
+  // session shows "[name] · [company]" even with no roster match.
+  const callerName =
+    pocMatch?.full_name ?? ghlCallerName ?? client.contact_name ?? "Caller";
 
   // Each call opens a fresh support session linked to its ticket (it
   // auto-closes when the ticket resolves), seeded with a call_log
@@ -250,6 +184,7 @@ export async function POST(request: NextRequest) {
       status: "active",
       category,
       chat_type: "session",
+      title: callerName,
       linked_ticket_id: ticket.id,
       point_of_contact_id: pocId,
       last_message_at: new Date().toISOString(),
@@ -311,6 +246,27 @@ export async function POST(request: NextRequest) {
       priority,
     }),
   ]);
+
+  // If the recording or transcript still isn't here, GHL likely hasn't
+  // finished processing. Schedule a one-shot retry that re-fetches from
+  // the contact and patches the ticket + call_log message.
+  // NOTE: self-scheduled delays are best-effort on serverless — the
+  // robust trigger is GHL firing a second "recording available" webhook
+  // (or a cron) hitting this same endpoint. See ghl-call-retry.
+  if (contactId && session && (!recordingUrl || !transcript)) {
+    const base = process.env.NEXT_PUBLIC_APP_URL ?? "";
+    const retryUrl =
+      `${base}/api/webhooks/ghl-call-retry?contactId=${encodeURIComponent(contactId)}` +
+      `&ticketId=${ticket.id}&threadId=${session.id}`;
+    after(async () => {
+      await new Promise((r) => setTimeout(r, 45000));
+      try {
+        await fetch(retryUrl);
+      } catch (e) {
+        console.error("[ghl-call] retry trigger failed:", e);
+      }
+    });
+  }
 
   return NextResponse.json({ received: true, ticket_id: ticket.id });
 }
