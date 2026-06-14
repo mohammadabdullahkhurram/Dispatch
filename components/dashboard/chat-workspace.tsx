@@ -44,6 +44,11 @@ import { EmptyState } from "@/components/empty-state";
 import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { PresenceDot, isOnline, usePresenceHeartbeat } from "@/components/chat/presence";
+import {
+  notifyBrowser,
+  playDing,
+  requestNotificationPermission,
+} from "@/components/chat/notify";
 import { UserAvatar } from "@/components/user-avatar";
 import { createClient } from "@/lib/supabase/client";
 import { slaDeadline } from "@/lib/sla";
@@ -118,6 +123,11 @@ export function ChatWorkspace({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  // Mirrors the set of known thread ids so the realtime handler can
+  // tell a genuinely-new session from a re-delivery without re-notifying.
+  const threadIdsRef = useRef<Set<string>>(
+    new Set(initialThreads.map((t) => t.id))
+  );
 
   const isAdmin =
     currentUser.role === "agency_owner" || currentUser.role === "agency_admin";
@@ -190,8 +200,17 @@ export function ChatWorkspace({
         const other = otherParticipantId(thread);
         return (other && dir[other]?.full_name) || "Direct message";
       }
-      default:
-        return thread.client?.company_name ?? "Session";
+      default: {
+        // Session: "[Contact] · [Company]" from the matched client user.
+        const company = thread.client?.company_name ?? "Client";
+        const contact =
+          thread.poc?.full_name ??
+          (thread.point_of_contact_id
+            ? dir[thread.point_of_contact_id]?.full_name
+            : null) ??
+          "Unknown";
+        return `${contact} · ${company}`;
+      }
     }
   }
 
@@ -345,12 +364,44 @@ export function ChatWorkspace({
       }
     }
 
+    // A new session (created server-side by the SMS/call webhooks)
+    // should appear for every team member live — add it to the list,
+    // ding, and raise a desktop notification.
+    async function ingestThread(row: ChatThread) {
+      if (row.chat_type !== "session") return;
+      if (threadIdsRef.current.has(row.id)) return;
+      threadIdsRef.current.add(row.id);
+
+      const { data: full } = await supabase
+        .from("chat_threads")
+        .select(SELECT_COLS)
+        .eq("id", row.id)
+        .single();
+      const thread = (full ?? row) as ChatThread;
+      setThreads((prev) =>
+        prev.some((t) => t.id === thread.id) ? prev : [thread, ...prev]
+      );
+
+      const company = thread.client?.company_name ?? "Client";
+      const contact = thread.poc?.full_name ?? "Unknown";
+      playDing();
+      notifyBrowser(
+        "New session",
+        `${company} - ${contact} started a new session`
+      );
+    }
+
     const channel = supabase
       .channel("team-chat-live")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_messages" },
         (payload) => ingest(payload.new as ChatMessage)
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_threads" },
+        (payload) => ingestThread(payload.new as ChatThread)
       )
       .on("broadcast", { event: "new_message" }, ({ payload }) =>
         ingest(payload as ChatMessage)
@@ -362,6 +413,16 @@ export function ChatWorkspace({
       supabase.removeChannel(channel);
     };
   }, [activeId, currentUser.id]);
+
+  // Keep the known-thread set in sync for the realtime de-dupe above.
+  useEffect(() => {
+    threadIdsRef.current = new Set(threads.map((t) => t.id));
+  }, [threads]);
+
+  // Ask once for desktop-notification permission.
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

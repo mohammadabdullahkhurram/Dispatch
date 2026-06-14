@@ -173,8 +173,30 @@ export function MessageBubble({
 
 const TRANSCRIPT_COLLAPSE_AT = 280;
 
-/** Rich inbound-call card: caller, duration, recording, AI summary,
- *  expandable transcript, category, and a link to the created ticket. */
+/** "Processing — check back shortly" with a subtle pulsing dot. */
+function Processing({ label = "Processing — check back shortly" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="size-1.5 animate-pulse rounded-full bg-amber-500" />
+      {label}
+    </span>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * Rich inbound-call card. Always shows every field — caller, category,
+ * duration, AI summary, recording, transcript, ticket link — with a
+ * pulsing "Processing" placeholder for anything GHL hasn't sent yet
+ * (recording/transcript/summary often lag the call by a few minutes).
+ */
 function CallLogCard({
   meta,
   ticketHrefBase,
@@ -198,61 +220,78 @@ function CallLogCard({
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="w-full space-y-2.5 rounded-lg border border-border bg-card p-3">
+    <div className="w-full space-y-3 rounded-lg border border-border bg-card p-3">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <Phone className="size-4 shrink-0 text-primary" />
           <span className="truncate">
             {meta.direction === "outbound" ? "Outbound call" : "Inbound call"}
-            {meta.caller_name ? ` · ${meta.caller_name}` : ""}
           </span>
         </div>
         {meta.category && <CategoryBadge category={meta.category} />}
       </div>
 
-      {/* Caller + duration line */}
-      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-        {meta.phone && <span>{meta.phone}</span>}
-        {meta.duration != null && !Number.isNaN(meta.duration) && (
-          <span>Duration: {formatDuration(meta.duration)}</span>
+      {/* Caller / category / duration */}
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div>
+          <FieldLabel>Caller</FieldLabel>
+          <p className="truncate">
+            {meta.caller_name ?? "Unknown"}
+            {meta.phone ? (
+              <span className="text-muted-foreground"> ({meta.phone})</span>
+            ) : null}
+          </p>
+        </div>
+        <div>
+          <FieldLabel>Duration</FieldLabel>
+          {meta.duration != null && !Number.isNaN(meta.duration) ? (
+            <p>{formatDuration(meta.duration)}</p>
+          ) : (
+            <p className="text-muted-foreground">—</p>
+          )}
+        </div>
+      </div>
+
+      {/* AI summary */}
+      <div className="rounded-md border border-primary/30 bg-primary/10 p-2.5">
+        <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-primary">
+          <Sparkles className="size-3" /> AI summary
+        </p>
+        {meta.ai_summary ? (
+          <p className="text-sm">{meta.ai_summary}</p>
+        ) : (
+          <Processing label="Processing…" />
         )}
-        {meta.status && <span className="capitalize">{meta.status}</span>}
       </div>
 
       {/* Recording */}
-      {meta.recording_url ? (
-        <audio controls src={meta.recording_url} className="h-9 w-full" />
-      ) : (
-        <p className="text-xs text-muted-foreground">No recording available.</p>
-      )}
+      <div>
+        <FieldLabel>Recording</FieldLabel>
+        {meta.recording_url ? (
+          <audio controls src={meta.recording_url} className="h-9 w-full" />
+        ) : (
+          <Processing />
+        )}
+      </div>
 
-      {/* AI summary */}
-      {meta.ai_summary && (
-        <div className="rounded-md border border-primary/30 bg-primary/10 p-2.5">
-          <p className="mb-0.5 flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-primary">
-            <Sparkles className="size-3" /> AI summary
-          </p>
-          <p className="text-sm">{meta.ai_summary}</p>
-        </div>
-      )}
-
-      {/* Transcript (collapsible when long) */}
-      {transcript ? (
-        <div>
-          <button
-            onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-            disabled={!isLong}
-          >
-            {isLong &&
-              (open ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              ))}
-            Transcript
-          </button>
+      {/* Transcript */}
+      <div>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          disabled={!transcript || !isLong}
+        >
+          {transcript && isLong ? (
+            open ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )
+          ) : null}
+          Transcript
+        </button>
+        {transcript ? (
           <p
             className={cn(
               "mt-1 whitespace-pre-wrap text-sm text-secondary-foreground",
@@ -261,15 +300,17 @@ function CallLogCard({
           >
             {transcript}
           </p>
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No transcript available.</p>
-      )}
+        ) : (
+          <div className="mt-1">
+            <Processing />
+          </div>
+        )}
+      </div>
 
-      {/* Ticket link */}
+      {/* Ticket link — directly to the ticket */}
       {meta.ticket_id && (
         <Link
-          href={ticketHrefBase}
+          href={`${ticketHrefBase}/${meta.ticket_id}`}
           className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline"
         >
           <TicketIcon className="size-3.5" /> View ticket

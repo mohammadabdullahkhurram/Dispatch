@@ -40,6 +40,49 @@ function pick(...vals: unknown[]): string | null {
   return null;
 }
 
+/**
+ * GHL custom fields arrive in inconsistent shapes depending on workflow
+ * config: a top-level key, nested under `contact`/`customData`, or as a
+ * customField array of { id|key|name, value }. The key casing/spacing
+ * also varies ("current_issue_category", "Current Issue Category", …).
+ * Recursively hunt for a key matching `re` and return its value.
+ */
+function deepFindField(obj: unknown, re: RegExp, depth = 0): string | null {
+  if (!obj || depth > 5) return null;
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      if (item && typeof item === "object") {
+        const o = item as Record<string, unknown>;
+        const keyish = String(o.key ?? o.name ?? o.id ?? "");
+        if (re.test(keyish)) {
+          const v = o.value ?? o.field_value ?? o.fieldValue;
+          if ((typeof v === "string" || typeof v === "number") && String(v).trim())
+            return String(v).trim();
+        }
+      }
+      const nested = deepFindField(item, re, depth + 1);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof obj === "object") {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (
+        re.test(k) &&
+        (typeof v === "string" || typeof v === "number") &&
+        String(v).trim()
+      ) {
+        return String(v).trim();
+      }
+      if (v && typeof v === "object") {
+        const nested = deepFindField(v, re, depth + 1);
+        if (nested) return nested;
+      }
+    }
+  }
+  return null;
+}
+
 /** Map an IVR digit or a category name to a valid category. */
 function resolveCategory(raw: string | null): TicketCategory {
   if (!raw) return "general";
@@ -103,11 +146,16 @@ export async function POST(request: NextRequest) {
     body?.call_duration,
     body?.callDuration
   );
-  const categoryRaw = pick(
-    body?.ivr_selection,
-    body?.current_issue_category,
-    contact.current_issue_category
-  );
+  const categoryRaw =
+    pick(
+      body?.ivr_selection,
+      body?.current_issue_category,
+      contact.current_issue_category,
+      (body?.customData as Record<string, unknown>)?.current_issue_category
+    ) ??
+    // Last resort: scan the whole payload for the IVR custom field
+    // regardless of where/how GHL nested or cased it.
+    (body ? deepFindField(body, /current[_\s-]?issue[_\s-]?category/i) : null);
   const aiSummary = pick(body?.ai_summary, body?.summary);
   const timestamp = pick(body?.timestamp, body?.date_created, body?.dateAdded);
 
@@ -127,6 +175,9 @@ export async function POST(request: NextRequest) {
   }
 
   const category = resolveCategory(categoryRaw);
+  console.log(
+    `[ghl-call] category: raw=${JSON.stringify(categoryRaw)} → resolved=${category}`
+  );
   const priority = priorityFromSummary(aiSummary);
 
   // Title from the AI summary when present, else a dated label.

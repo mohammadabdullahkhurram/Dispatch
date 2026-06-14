@@ -78,15 +78,22 @@ export function TicketsBoard({
   teamMembers,
   departments,
   clients,
+  openTicketId,
 }: {
   currentUser: UserProfile;
   initialTickets: Ticket[];
   teamMembers: UserProfile[];
   departments: Department[];
   clients: ClientOption[];
+  /** When set (deep link /dashboard/tickets/[id]), open this ticket's panel. */
+  openTicketId?: string;
 }) {
   const [tickets, setTickets] = useState(initialTickets);
-  const [selected, setSelected] = useState<Ticket | null>(null);
+  const [selected, setSelected] = useState<Ticket | null>(
+    openTicketId
+      ? (initialTickets.find((t) => t.id === openTicketId) ?? null)
+      : null
+  );
   const [activity, setActivity] = useState<TicketActivity[]>([]);
   const [note, setNote] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
