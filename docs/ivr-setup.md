@@ -47,9 +47,26 @@ Payload mapping:
 }
 ```
 
+Add these **Custom Data** keys to the webhook action (used for the IVR
+category and call reference):
+
+| Key | Value |
+| --- | --- |
+| `current_issue_category` | `{{contact.current_issue_category}}` |
+| `call_sid` | `{{transcript_generated.call_sid}}` |
+
 > Field tokens vary by GHL plan/version — match whatever your workflow
 > builder exposes for the recording URL, transcript text, AI summary,
 > and the IVR digit. The names on the left are what Dispatch expects.
+>
+> **Recording URL often isn't ready when the webhook fires.** When
+> `recording_url` is empty, Dispatch backfills it itself — first from the
+> GHL contact record, then via the **Conversations API** (find the
+> contact's conversation → scan its messages for the call entry →
+> extract the recording URL) using `GHL_API_KEY` + `GHL_LOCATION_ID`. A
+> delayed retry (`/api/webhooks/ghl-call-retry`) covers transcripts that
+> finish later; you can also point a second "recording available"
+> workflow at that endpoint.
 
 ## 3. What Dispatch does on receipt
 

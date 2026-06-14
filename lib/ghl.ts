@@ -188,6 +188,111 @@ export async function getGhlContact(
   return data.contact ?? null;
 }
 
+/** Pull a recording URL out of a GHL conversation message, whatever
+ *  shape it's in (top-level, meta, attachments). */
+function recordingFromMessage(m: Record<string, unknown>): string | null {
+  const direct =
+    m.recordingUrl ??
+    m.recording_url ??
+    m.url ??
+    (m.meta as Record<string, unknown> | undefined)?.recordingUrl ??
+    ((m.meta as Record<string, unknown> | undefined)?.call as
+      | Record<string, unknown>
+      | undefined)?.recordingUrl;
+  if (typeof direct === "string" && /^https?:\/\//.test(direct)) return direct;
+
+  const attachments = m.attachments;
+  if (Array.isArray(attachments)) {
+    for (const a of attachments) {
+      const url = typeof a === "string" ? a : (a as Record<string, unknown>)?.url;
+      if (typeof url === "string" && /^https?:\/\//.test(url)) return url;
+    }
+  }
+  if (typeof m.body === "string" && /^https?:\/\/\S+$/.test(m.body.trim()))
+    return m.body.trim();
+  return null;
+}
+
+/**
+ * Retrieve a call recording URL via the GHL Conversations API (no
+ * Twilio): find the contact's conversation, then scan its messages for
+ * a call/recording entry and extract the URL. Logs what it sees so the
+ * extraction can be tuned to GHL's actual shape.
+ */
+export async function getCallRecordingUrl(
+  contactId: string,
+  locationId: string
+): Promise<string | null> {
+  try {
+    const searchRes = await fetch(
+      `${GHL_API_BASE}/conversations/search?contactId=${encodeURIComponent(contactId)}&locationId=${encodeURIComponent(locationId)}`,
+      { headers: ghlHeaders() }
+    );
+    if (!searchRes.ok) {
+      console.error(`[ghl-recording] conversation search failed: ${searchRes.status}`);
+      return null;
+    }
+    const searchData = (await searchRes.json()) as {
+      conversations?: Array<{ id?: string }>;
+    };
+    console.log(
+      `[ghl-recording] conversations/search → ${JSON.stringify(searchData).slice(0, 400)}`
+    );
+    const conversations = searchData.conversations ?? [];
+
+    for (const conv of conversations) {
+      if (!conv.id) continue;
+      const msgRes = await fetch(
+        `${GHL_API_BASE}/conversations/${conv.id}/messages`,
+        { headers: ghlHeaders() }
+      );
+      if (!msgRes.ok) {
+        const body = await msgRes.text().catch(() => "");
+        if (msgRes.status === 401 || /scope/i.test(body)) {
+          console.error(
+            "[ghl-recording] messages read rejected (401): the GHL_API_KEY " +
+              "token needs the 'conversations/message.readonly' scope. " +
+              "Recreate the Private Integration Token with it added."
+          );
+        } else {
+          console.error(
+            `[ghl-recording] messages fetch failed for ${conv.id}: ${msgRes.status} ${body.slice(0, 150)}`
+          );
+        }
+        continue;
+      }
+      const msgData = (await msgRes.json()) as {
+        messages?: { messages?: unknown[] } | unknown[];
+      };
+      console.log(
+        `[ghl-recording] messages(${conv.id}) → ${JSON.stringify(msgData).slice(0, 800)}`
+      );
+      const raw = msgData.messages;
+      const messages: unknown[] = Array.isArray(raw)
+        ? raw
+        : ((raw as { messages?: unknown[] } | undefined)?.messages ?? []);
+
+      for (const item of messages) {
+        if (!item || typeof item !== "object") continue;
+        const m = item as Record<string, unknown>;
+        const kind = String(m.messageType ?? m.type ?? "").toLowerCase();
+        if (kind.includes("call") || kind.includes("recording")) {
+          const url = recordingFromMessage(m);
+          if (url) {
+            console.log(`[ghl-recording] found recording URL: ${url}`);
+            return url;
+          }
+        }
+      }
+    }
+    console.log("[ghl-recording] no recording URL found in conversations");
+    return null;
+  } catch (error) {
+    console.error("[ghl-recording] lookup threw:", error);
+    return null;
+  }
+}
+
 /** Return the tags on a GHL contact. */
 export async function getContactTags(contactId: string): Promise<string[]> {
   const res = await fetch(`${GHL_API_BASE}/contacts/${contactId}`, {

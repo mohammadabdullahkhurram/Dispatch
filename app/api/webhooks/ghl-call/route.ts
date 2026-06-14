@@ -1,7 +1,7 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findClientByPhone, findContactUser } from "@/lib/phone";
-import { getGhlContact } from "@/lib/ghl";
+import { getCallRecordingUrl, getGhlContact } from "@/lib/ghl";
 import {
   deepFindField,
   extractCallArtifacts,
@@ -69,6 +69,13 @@ export async function POST(request: NextRequest) {
     (body ? deepFindField(body, /current[_\s-]?issue[_\s-]?category/i) : null);
   const timestamp = pick(body?.timestamp, body?.date_created, body?.dateAdded);
   const ghlCallerName = body ? extractCallerName(body) : null;
+  const customData = (body?.customData ?? {}) as Record<string, unknown>;
+  const callSid = pick(
+    customData.call_sid,
+    body?.call_sid,
+    contact.call_sid,
+    body ? deepFindField(body, /call[_\s-]?sid/i) : null
+  );
 
   // Without a phone we can't attribute the call to a client — ack so
   // GHL doesn't retry-storm, but don't 400.
@@ -100,6 +107,14 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       console.error("[ghl-call] contact backfill failed:", e);
     }
+  }
+
+  // Recording still missing → pull it from the GHL Conversations API
+  // (find the contact's conversation, scan messages for the call entry).
+  const locationId = process.env.GHL_LOCATION_ID;
+  if (!recordingUrl && contactId && locationId) {
+    const fetched = await getCallRecordingUrl(contactId, locationId);
+    if (fetched) recordingUrl = fetched;
   }
 
   const category = resolveCategory(categoryRaw);
@@ -157,6 +172,21 @@ export async function POST(request: NextRequest) {
       { error: "Failed to create ticket" },
       { status: 500 }
     );
+  }
+
+  // Store the Twilio call SID for reference. Separate update so a
+  // missing column (migration 016 not yet applied) can't break ticket
+  // creation — the error is logged and ignored.
+  if (callSid) {
+    const { error: sidError } = await supabase
+      .from("tickets")
+      .update({ call_sid: callSid })
+      .eq("id", ticket.id);
+    if (sidError) {
+      console.warn(
+        `[ghl-call] call_sid not stored (apply migration 016): ${sidError.message}`
+      );
+    }
   }
 
   // Point of contact: match by phone, then by the GHL-provided name.
@@ -217,6 +247,7 @@ export async function POST(request: NextRequest) {
             ai_summary: aiSummary,
             ticket_id: ticket.id,
             category,
+            call_sid: callSid,
           },
         })
       : Promise.resolve(),
@@ -237,6 +268,7 @@ export async function POST(request: NextRequest) {
         ivr_selection: categoryRaw,
         has_ai_summary: !!aiSummary,
         duration: durationStr,
+        call_sid: callSid,
       },
     }),
     notifyDepartmentHead(supabase, matchedDepartment?.id ?? null, {
