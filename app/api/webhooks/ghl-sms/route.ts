@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findClientByPhone, phonesMatch } from "@/lib/phone";
+import { findClientByPhone, findContactUser } from "@/lib/phone";
 import {
   DISPATCH_TAG,
   getContactTags,
@@ -128,21 +128,8 @@ export async function POST(request: NextRequest) {
   // Attribute the SMS to the specific person on the client's roster
   // whose phone matches — they become the message sender and the
   // session's point of contact.
-  const { data: roster } = await supabase
-    .from("client_users")
-    .select("user:users(id, phone)")
-    .eq("client_id", client.id);
-
   const senderId =
-    (roster ?? [])
-      .map((row) => {
-        const rel = row.user as unknown;
-        return (Array.isArray(rel) ? rel[0] : rel) as {
-          id: string;
-          phone: string | null;
-        } | null;
-      })
-      .find((u) => u && phonesMatch(u.phone, payload.phone!))?.id ?? null;
+    (await findContactUser(supabase, client.id, payload.phone))?.id ?? null;
 
   // SMS goes to a support SESSION, never the workspace thread.
   // Reuse the client's active session or open a new one.
@@ -151,7 +138,7 @@ export async function POST(request: NextRequest) {
     .select("id, point_of_contact_id")
     .eq("client_id", client.id)
     .eq("status", "active")
-    .not("category", "in", '("workspace","internal","dm")')
+    .eq("chat_type", "session")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -163,6 +150,7 @@ export async function POST(request: NextRequest) {
         client_id: client.id,
         status: "active",
         category: "general",
+        chat_type: "session",
         point_of_contact_id: senderId,
         last_message_at: new Date().toISOString(),
       })

@@ -45,6 +45,7 @@ import { ChatTextarea } from "@/components/chat/chat-textarea";
 import { MessageBubble } from "@/components/chat/message-bubble";
 import { PresenceDot, isOnline, usePresenceHeartbeat } from "@/components/chat/presence";
 import {
+  installAudioUnlock,
   notifyBrowser,
   playDing,
   requestNotificationPermission,
@@ -202,13 +203,15 @@ export function ChatWorkspace({
       }
       default: {
         // Session: "[Contact] · [Company]" from the matched client user.
+        // No match → "Caller" for call sessions (they link a ticket),
+        // "SMS" for text sessions.
         const company = thread.client?.company_name ?? "Client";
         const contact =
           thread.poc?.full_name ??
           (thread.point_of_contact_id
             ? dir[thread.point_of_contact_id]?.full_name
             : null) ??
-          "Unknown";
+          (thread.linked_ticket_id ? "Caller" : "SMS");
         return `${contact} · ${company}`;
       }
     }
@@ -356,6 +359,10 @@ export function ChatWorkspace({
         setMessages((prev) =>
           prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]
         );
+        // Ding on an incoming message in the open thread (not my own).
+        if (incoming.sender_id && incoming.sender_id !== currentUser.id) {
+          playDing();
+        }
       } else if (incoming.sender_id && incoming.sender_id !== currentUser.id) {
         setUnreadByThread((prev) => ({
           ...prev,
@@ -364,9 +371,31 @@ export function ChatWorkspace({
       }
     }
 
-    // A new session (created server-side by the SMS/call webhooks)
-    // should appear for every team member live — add it to the list,
-    // ding, and raise a desktop notification.
+    const channel = supabase
+      .channel("team-chat-messages")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "chat_messages" },
+        (payload) => ingest(payload.new as ChatMessage)
+      )
+      .on("broadcast", { event: "new_message" }, ({ payload }) =>
+        ingest(payload as ChatMessage)
+      )
+      .subscribe();
+    channelRef.current = channel;
+    return () => {
+      channelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, [activeId, currentUser.id]);
+
+  // Dedicated, always-on subscription for NEW sessions. Kept on its own
+  // channel and mounted once (no activeId dependency) so it never tears
+  // down when the user switches threads — that churn is why new sessions
+  // were being missed.
+  useEffect(() => {
+    const supabase = createClient();
+
     async function ingestThread(row: ChatThread) {
       if (row.chat_type !== "session") return;
       if (threadIdsRef.current.has(row.id)) return;
@@ -383,7 +412,8 @@ export function ChatWorkspace({
       );
 
       const company = thread.client?.company_name ?? "Client";
-      const contact = thread.poc?.full_name ?? "Unknown";
+      const contact =
+        thread.poc?.full_name ?? (thread.linked_ticket_id ? "Caller" : "SMS");
       playDing();
       notifyBrowser(
         "New session",
@@ -392,36 +422,27 @@ export function ChatWorkspace({
     }
 
     const channel = supabase
-      .channel("team-chat-live")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "chat_messages" },
-        (payload) => ingest(payload.new as ChatMessage)
-      )
+      .channel("new-sessions")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "chat_threads" },
         (payload) => ingestThread(payload.new as ChatThread)
       )
-      .on("broadcast", { event: "new_message" }, ({ payload }) =>
-        ingest(payload as ChatMessage)
-      )
       .subscribe();
-    channelRef.current = channel;
     return () => {
-      channelRef.current = null;
       supabase.removeChannel(channel);
     };
-  }, [activeId, currentUser.id]);
+  }, []);
 
   // Keep the known-thread set in sync for the realtime de-dupe above.
   useEffect(() => {
     threadIdsRef.current = new Set(threads.map((t) => t.id));
   }, [threads]);
 
-  // Ask once for desktop-notification permission.
+  // Ask for desktop-notification permission + unlock audio on first use.
   useEffect(() => {
     requestNotificationPermission();
+    installAudioUnlock();
   }, []);
 
   useEffect(() => {

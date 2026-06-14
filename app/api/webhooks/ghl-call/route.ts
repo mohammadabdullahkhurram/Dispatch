@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findClientByPhone, phonesMatch } from "@/lib/phone";
+import { findClientByPhone, findContactUser } from "@/lib/phone";
 import { slaDeadline } from "@/lib/sla";
 import { formatDuration } from "@/lib/format";
 import type { Priority, TicketCategory } from "@/lib/types";
@@ -233,24 +233,11 @@ export async function POST(request: NextRequest) {
 
   // The caller becomes the session's point of contact when their
   // phone matches someone on the client's roster.
-  const { data: roster } = await supabase
-    .from("client_users")
-    .select("user:users(id, full_name, phone)")
-    .eq("client_id", client.id);
-  const pocMatch = (roster ?? [])
-    .map((row) => {
-      const rel = row.user as unknown;
-      return (Array.isArray(rel) ? rel[0] : rel) as {
-        id: string;
-        full_name: string | null;
-        phone: string | null;
-      } | null;
-    })
-    .find((u) => u && phonesMatch(u.phone, callerPhone));
+  const pocMatch = await findContactUser(supabase, client.id, callerPhone);
   const pocId = pocMatch?.id ?? null;
   // Display name for the call_log: matched roster member, else the
-  // client's primary contact.
-  const callerName = pocMatch?.full_name ?? client.contact_name ?? null;
+  // client's primary contact, else "Caller".
+  const callerName = pocMatch?.full_name ?? client.contact_name ?? "Caller";
 
   // Each call opens a fresh support session linked to its ticket (it
   // auto-closes when the ticket resolves), seeded with a call_log

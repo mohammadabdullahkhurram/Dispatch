@@ -33,3 +33,39 @@ export async function findClientByPhone(
     (data as Client[]).find((c) => phonesMatch(c.phone, phone)) ?? null
   );
 }
+
+/**
+ * Find the specific client user on a client's roster whose phone matches
+ * the caller — used to attribute an inbound call/SMS to a person and set
+ * the session's point of contact. Logs the roster + result so a missing
+ * match (e.g. roster members with no phone on file) is diagnosable.
+ */
+export async function findContactUser(
+  supabase: SupabaseClient,
+  clientId: string,
+  phone: string
+): Promise<{ id: string; full_name: string | null } | null> {
+  const { data } = await supabase
+    .from("client_users")
+    .select("user:users(id, full_name, phone)")
+    .eq("client_id", clientId);
+
+  const members = (data ?? [])
+    .map((row) => {
+      const rel = row.user as unknown;
+      return (Array.isArray(rel) ? rel[0] : rel) as {
+        id: string;
+        full_name: string | null;
+        phone: string | null;
+      } | null;
+    })
+    .filter((u): u is { id: string; full_name: string | null; phone: string | null } => !!u);
+
+  const match = members.find((u) => phonesMatch(u.phone, phone));
+  console.log(
+    `[poc-lookup] client=${clientId} caller=${phone} ` +
+      `roster=${JSON.stringify(members.map((m) => ({ name: m.full_name, phone: m.phone })))} ` +
+      `→ ${match ? `${match.full_name} (${match.id})` : "NO MATCH"}`
+  );
+  return match ? { id: match.id, full_name: match.full_name } : null;
+}
