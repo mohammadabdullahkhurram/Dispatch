@@ -1,7 +1,7 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findClientByPhone, findContactUser } from "@/lib/phone";
-import { getCallRecordingUrl, getGhlContact } from "@/lib/ghl";
+import { getCallRecordingFromConversation, getGhlContact } from "@/lib/ghl";
 import {
   deepFindField,
   extractCallArtifacts,
@@ -41,7 +41,12 @@ export async function POST(request: NextRequest) {
   console.error("GHL CALL PAYLOAD:", JSON.stringify(body));
 
   const contact = (body?.contact ?? {}) as Record<string, unknown>;
-  const contactId = pick(body?.contactId, body?.contact_id, contact.id);
+  // contactId from body.contact_id; locationId from body.location.id
+  // (per GHL webhook payload), with fallbacks.
+  const contactId = pick(body?.contact_id, body?.contactId, contact.id);
+  const location = (body?.location ?? {}) as Record<string, unknown>;
+  const locationId =
+    pick(location.id, body?.locationId) ?? process.env.GHL_LOCATION_ID ?? null;
 
   const callerPhone = pick(
     body?.caller_phone,
@@ -92,15 +97,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, matched: false });
   }
 
-  // If GHL fired before processing finished, recording/transcript may be
-  // absent from the webhook body — try the contact record now as a cheap
-  // first backfill (a delayed retry below covers the slower cases).
-  if (contactId && (!recordingUrl || !transcript)) {
+  // Transcript / AI summary may not be in the webhook body if GHL fired
+  // before finishing processing — backfill them from the contact record.
+  if (contactId && (!transcript || !aiSummary)) {
     try {
       const fresh = await getGhlContact(contactId);
       if (fresh) {
         const art = extractCallArtifacts(fresh);
-        recordingUrl = recordingUrl ?? art.recordingUrl;
         if (!transcript) transcript = art.transcript;
         aiSummary = aiSummary ?? art.aiSummary;
       }
@@ -109,12 +112,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Recording still missing → pull it from the GHL Conversations API
-  // (find the contact's conversation, scan messages for the call entry).
-  const locationId = process.env.GHL_LOCATION_ID;
+  // Recording URL: when empty, fetch it from the GHL Conversations API
+  // (search conversation → read messages → extract recording URL).
   if (!recordingUrl && contactId && locationId) {
-    const fetched = await getCallRecordingUrl(contactId, locationId);
-    if (fetched) recordingUrl = fetched;
+    const result = await getCallRecordingFromConversation(contactId, locationId);
+    console.error("[recording-url] fetched:", result);
+    if (result) recordingUrl = result;
   }
 
   const category = resolveCategory(categoryRaw);

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getGhlContact } from "@/lib/ghl";
+import { getCallRecordingFromConversation, getGhlContact } from "@/lib/ghl";
 import { extractCallArtifacts, summaryToTitle } from "@/lib/ghl-call";
 
 /**
@@ -32,7 +32,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, reason: "contact not found" });
   }
 
-  const { recordingUrl, transcript, aiSummary } = extractCallArtifacts(contact);
+  // Transcript + summary come from the contact record; the recording URL
+  // comes from the Conversations API (the same clean path the webhook uses).
+  const { transcript, aiSummary } = extractCallArtifacts(contact);
+  const locationId =
+    (typeof contact.locationId === "string" ? contact.locationId : null) ??
+    process.env.GHL_LOCATION_ID ??
+    null;
+  const recordingUrl = locationId
+    ? await getCallRecordingFromConversation(contactId, locationId)
+    : null;
   console.log(
     `[ghl-call-retry] contact=${contactId} recording=${!!recordingUrl} transcript=${!!transcript} summary=${!!aiSummary}`
   );

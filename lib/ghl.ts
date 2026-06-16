@@ -188,107 +188,124 @@ export async function getGhlContact(
   return data.contact ?? null;
 }
 
-/** Pull a recording URL out of a GHL conversation message, whatever
- *  shape it's in (top-level, meta, attachments). */
-function recordingFromMessage(m: Record<string, unknown>): string | null {
-  const direct =
-    m.recordingUrl ??
-    m.recording_url ??
-    m.url ??
-    (m.meta as Record<string, unknown> | undefined)?.recordingUrl ??
-    ((m.meta as Record<string, unknown> | undefined)?.call as
-      | Record<string, unknown>
-      | undefined)?.recordingUrl;
-  if (typeof direct === "string" && /^https?:\/\//.test(direct)) return direct;
+/** Extract a recording URL from a single GHL conversation message,
+ *  checking the documented locations in order. */
+function recordingUrlFromMessage(msg: Record<string, unknown>): string | null {
+  const meta = (msg.meta as Record<string, unknown> | undefined) ?? {};
+  // 1. meta.recording.url  /  meta.call.recordingUrl / meta.call.url
+  const recording = meta.recording as Record<string, unknown> | undefined;
+  if (typeof recording?.url === "string" && recording.url) return recording.url;
+  const call = meta.call as Record<string, unknown> | undefined;
+  for (const v of [call?.recordingUrl, call?.url, call?.recording_url]) {
+    if (typeof v === "string" && /^https?:\/\//.test(v)) return v;
+  }
 
-  const attachments = m.attachments;
-  if (Array.isArray(attachments)) {
-    for (const a of attachments) {
-      const url = typeof a === "string" ? a : (a as Record<string, unknown>)?.url;
-      if (typeof url === "string" && /^https?:\/\//.test(url)) return url;
+  // 2. recordingUrl
+  if (typeof msg.recordingUrl === "string" && msg.recordingUrl)
+    return msg.recordingUrl;
+
+  // 3. attachments — an audio type or a URL containing "recording"
+  if (Array.isArray(msg.attachments)) {
+    for (const a of msg.attachments) {
+      const att = (typeof a === "object" && a ? a : {}) as Record<string, unknown>;
+      const url = typeof a === "string" ? a : (att.url as string | undefined);
+      const type = String(att.type ?? "").toLowerCase();
+      if (typeof url === "string" && (type.includes("audio") || /recording/i.test(url)))
+        return url;
     }
   }
-  if (typeof m.body === "string" && /^https?:\/\/\S+$/.test(m.body.trim()))
-    return m.body.trim();
+
+  // 4. body containing a recording URL
+  if (typeof msg.body === "string") {
+    const m = msg.body.match(/https?:\/\/\S*recording\S*/i);
+    if (m) return m[0];
+  }
   return null;
 }
 
 /**
- * Retrieve a call recording URL via the GHL Conversations API (no
- * Twilio): find the contact's conversation, then scan its messages for
- * a call/recording entry and extract the URL. Logs what it sees so the
- * extraction can be tuned to GHL's actual shape.
+ * Get a call recording URL via the GHL Conversations API (no Twilio).
+ * Two steps, each with the version the endpoint expects:
+ *   1. GET /conversations/search?locationId=&contactId=   (Version 2021-07-28)
+ *      → conversations[0].id
+ *   2. GET /conversations/{id}/messages                   (Version 2021-04-15)
+ *      → scan messages for the recording URL
  */
-export async function getCallRecordingUrl(
+export async function getCallRecordingFromConversation(
   contactId: string,
   locationId: string
 ): Promise<string | null> {
+  const apiKey = process.env.GHL_API_KEY;
+  if (!apiKey) {
+    console.error("[recording-fetch] GHL_API_KEY not set");
+    return null;
+  }
   try {
+    // Step 1 — search conversation.
     const searchRes = await fetch(
-      `${GHL_API_BASE}/conversations/search?contactId=${encodeURIComponent(contactId)}&locationId=${encodeURIComponent(locationId)}`,
-      { headers: ghlHeaders() }
+      `${GHL_API_BASE}/conversations/search?locationId=${encodeURIComponent(locationId)}&contactId=${encodeURIComponent(contactId)}`,
+      {
+        headers: {
+          Accept: "application/json",
+          Version: "2021-07-28",
+          Authorization: `Bearer ${apiKey}`,
+        },
+      }
     );
     if (!searchRes.ok) {
-      console.error(`[ghl-recording] conversation search failed: ${searchRes.status}`);
+      const b = await searchRes.text().catch(() => "");
+      console.error(`[recording-fetch] search failed: ${searchRes.status} ${b.slice(0, 150)}`);
       return null;
     }
     const searchData = (await searchRes.json()) as {
       conversations?: Array<{ id?: string }>;
     };
-    console.log(
-      `[ghl-recording] conversations/search → ${JSON.stringify(searchData).slice(0, 400)}`
-    );
-    const conversations = searchData.conversations ?? [];
+    const conversationId = searchData?.conversations?.[0]?.id;
+    console.error(`[recording-fetch] conversationId: ${conversationId ?? "none"}`);
+    if (!conversationId) return null;
 
-    for (const conv of conversations) {
-      if (!conv.id) continue;
-      const msgRes = await fetch(
-        `${GHL_API_BASE}/conversations/${conv.id}/messages`,
-        { headers: ghlHeaders() }
-      );
-      if (!msgRes.ok) {
-        const body = await msgRes.text().catch(() => "");
-        if (msgRes.status === 401 || /scope/i.test(body)) {
-          console.error(
-            "[ghl-recording] messages read rejected (401): the GHL_API_KEY " +
-              "token needs the 'conversations/message.readonly' scope. " +
-              "Recreate the Private Integration Token with it added."
-          );
-        } else {
-          console.error(
-            `[ghl-recording] messages fetch failed for ${conv.id}: ${msgRes.status} ${body.slice(0, 150)}`
-          );
-        }
-        continue;
+    // Step 2 — conversation messages.
+    const msgRes = await fetch(
+      `${GHL_API_BASE}/conversations/${conversationId}/messages`,
+      {
+        headers: {
+          Accept: "application/json",
+          Version: "2021-04-15",
+          Authorization: `Bearer ${apiKey}`,
+        },
       }
-      const msgData = (await msgRes.json()) as {
-        messages?: { messages?: unknown[] } | unknown[];
-      };
-      console.log(
-        `[ghl-recording] messages(${conv.id}) → ${JSON.stringify(msgData).slice(0, 800)}`
-      );
-      const raw = msgData.messages;
-      const messages: unknown[] = Array.isArray(raw)
-        ? raw
-        : ((raw as { messages?: unknown[] } | undefined)?.messages ?? []);
+    );
+    if (!msgRes.ok) {
+      const b = await msgRes.text().catch(() => "");
+      console.error(`[recording-fetch] messages failed: ${msgRes.status} ${b.slice(0, 200)}`);
+      return null;
+    }
+    const msgData = (await msgRes.json()) as {
+      messages?: { messages?: unknown[] } | unknown[];
+    };
+    // GHL nests as { messages: { messages: [...] } }; tolerate a flat array too.
+    const raw = msgData?.messages;
+    const messages: unknown[] = Array.isArray(raw)
+      ? raw
+      : ((raw as { messages?: unknown[] } | undefined)?.messages ?? []);
 
-      for (const item of messages) {
-        if (!item || typeof item !== "object") continue;
-        const m = item as Record<string, unknown>;
-        const kind = String(m.messageType ?? m.type ?? "").toLowerCase();
-        if (kind.includes("call") || kind.includes("recording")) {
-          const url = recordingFromMessage(m);
-          if (url) {
-            console.log(`[ghl-recording] found recording URL: ${url}`);
-            return url;
-          }
-        }
+    console.error(
+      "[recording-fetch] messages:",
+      JSON.stringify(messages.slice(0, 5))
+    );
+
+    for (const item of messages) {
+      if (!item || typeof item !== "object") continue;
+      const url = recordingUrlFromMessage(item as Record<string, unknown>);
+      if (url) {
+        console.error("[recording-fetch] found URL:", url);
+        return url;
       }
     }
-    console.log("[ghl-recording] no recording URL found in conversations");
+    console.error("[recording-fetch] no recording URL in messages");
     return null;
   } catch (error) {
-    console.error("[ghl-recording] lookup threw:", error);
+    console.error("[recording-fetch] threw:", error);
     return null;
   }
 }
