@@ -261,7 +261,6 @@ export async function getCallRecordingFromConversation(
       conversations?: Array<{ id?: string }>;
     };
     const conversationId = searchData?.conversations?.[0]?.id;
-    console.error(`[recording-fetch] conversationId: ${conversationId ?? "none"}`);
     if (!conversationId) return null;
 
     // Step 2 — conversation messages.
@@ -289,20 +288,11 @@ export async function getCallRecordingFromConversation(
       ? raw
       : ((raw as { messages?: unknown[] } | undefined)?.messages ?? []);
 
-    console.error(
-      "[recording-fetch] messages:",
-      JSON.stringify(messages.slice(0, 5))
-    );
-
     for (const item of messages) {
       if (!item || typeof item !== "object") continue;
       const url = recordingUrlFromMessage(item as Record<string, unknown>);
-      if (url) {
-        console.error("[recording-fetch] found URL:", url);
-        return url;
-      }
+      if (url) return url;
     }
-    console.error("[recording-fetch] no recording URL in messages");
     return null;
   } catch (error) {
     console.error("[recording-fetch] threw:", error);
@@ -373,7 +363,6 @@ export async function sendEmail(
   try {
     contact = await searchContactByEmail(to);
     if (!contact) {
-      console.log(`[ghl-email] no GHL contact for ${to} — creating one`);
       contact = await createGhlContact({
         email: to,
         name: options?.contactName,
@@ -385,7 +374,6 @@ export async function sendEmail(
     return { ok: false, error: message };
   }
   if (!contact) {
-    console.error(`[ghl-email] could not find or create a contact for ${to}`);
     return { ok: false, error: `No GHL contact found or created for ${to}` };
   }
 
@@ -393,52 +381,30 @@ export async function sendEmail(
   // contact record itself carries the address — a phone-only lead
   // (e.g. created from inbound SMS) won't. Backfill it before sending.
   if (!contact.email || contact.email.toLowerCase() !== to.toLowerCase()) {
-    console.log(
-      `[ghl-email] contact ${contact.id} email on record = ${contact.email ?? "(none)"}; setting to ${to}`
-    );
     await ensureContactEmail(contact.id, to);
   }
-
-  console.log(
-    `[ghl-email] sending "${subject}" to ${to} (contact ${contact.id}) from ${process.env.GHL_FROM_EMAIL}`
-  );
 
   // Canonical LeadConnector "send email" message: POST /conversations/
   // messages with type "Email". GHL wants both `html` (rich body) and a
   // plain-text `message` fallback; emailTo defaults to the contact but
   // we set it explicitly. Requires the GHL_API_KEY token to carry the
   // `conversations/message.write` scope.
-  const url = `${GHL_API_BASE}/conversations/messages`;
-  const payload = {
-    type: "Email",
-    contactId: contact.id,
-    subject,
-    html: htmlBody,
-    message: htmlToText(htmlBody),
-    emailTo: to,
-    emailFrom: process.env.GHL_FROM_EMAIL,
-  };
-  const apiKey = process.env.GHL_API_KEY ?? "";
-  console.log(`[ghl-email][debug] POST ${url}`);
-  console.log(
-    `[ghl-email][debug] auth: Bearer ${apiKey.slice(0, 4)}…${apiKey.slice(-4)} (len ${apiKey.length}), Version: ${GHL_API_VERSION}`
-  );
-  console.log(
-    `[ghl-email][debug] payload: ${JSON.stringify({ ...payload, html: `<${htmlBody.length} chars>`, message: `<${payload.message.length} chars>` })}`
-  );
-
-  const res = await fetch(url, {
+  const res = await fetch(`${GHL_API_BASE}/conversations/messages`, {
     method: "POST",
     headers: ghlHeaders(),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      type: "Email",
+      contactId: contact.id,
+      subject,
+      html: htmlBody,
+      message: htmlToText(htmlBody),
+      emailTo: to,
+      emailFrom: process.env.GHL_FROM_EMAIL,
+    }),
   });
 
-  const resBody = await res.text().catch(() => "");
-  console.log(
-    `[ghl-email][debug] response ${res.status} ${res.statusText}: ${resBody.slice(0, 500)}`
-  );
-
   if (!res.ok) {
+    const resBody = await res.text().catch(() => "");
     // 401/403 here is a token-scope problem, not a payload problem —
     // give the exact remediation so it isn't mistaken for a code bug.
     const scopeIssue =
@@ -455,7 +421,6 @@ export async function sendEmail(
     console.error(`[ghl-email] ${error}`);
     return { ok: false, error };
   }
-  console.log(`[ghl-email] sent to ${to}`);
   return { ok: true };
 }
 

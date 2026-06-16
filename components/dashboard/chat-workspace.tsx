@@ -173,7 +173,7 @@ export function ChatWorkspace({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadByThread, setUnreadByThread] = useState<Record<string, number>>({});
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   const active = useMemo(
     () => threads.find((t) => t.id === activeId) ?? null,
@@ -447,7 +447,9 @@ export function ChatWorkspace({
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scroll the message list itself, never the page.
+    const el = messageListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
 
   // ---- Sending ---------------------------------------------------------
@@ -916,9 +918,9 @@ export function ChatWorkspace({
       .filter(Boolean);
 
   return (
-    <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden md:h-[calc(100vh-57px)]">
+    <div className="flex h-[calc(100dvh-3.5rem)] flex-1 overflow-hidden">
       {/* Sidebar */}
-      <aside className="flex w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-[300px]">
+      <aside className="flex min-h-0 w-full max-w-xs shrink-0 flex-col border-r border-border sm:w-[300px]">
         <div className="space-y-2.5 border-b border-border px-4 py-3.5">
           <div className="flex items-center justify-between">
             <h1 className="text-base font-semibold tracking-tight">Chat</h1>
@@ -1144,7 +1146,10 @@ export function ChatWorkspace({
               otherParticipantId={otherParticipantId}
             />
 
-            <div className="flex-1 space-y-4 overflow-y-auto p-5">
+            <div
+              ref={messageListRef}
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5"
+            >
               {loadingMessages ? (
                 <p className="text-center text-sm text-muted-foreground">
                   Loading messages…
@@ -1166,7 +1171,6 @@ export function ChatWorkspace({
                   />
                 ))
               )}
-              <div ref={bottomRef} />
             </div>
 
             <div className="relative border-t border-border p-4">

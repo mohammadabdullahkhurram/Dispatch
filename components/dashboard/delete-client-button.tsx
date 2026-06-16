@@ -12,21 +12,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { createClient } from "@/lib/supabase/client";
-import { logAudit } from "@/lib/audit";
 
 /**
- * Permanently deletes a client. FKs cascade: tickets, chat threads +
- * messages, checklist items, documents, and roster links all go with
- * it (tasks keep their rows but lose the client reference).
+ * Permanently deletes a client via the server route, which tears down
+ * the chat (messages → threads, past the workspace no-delete guard)
+ * before deleting the client. Tickets, checklist items, documents, and
+ * roster links cascade from the client.
  */
 export function DeleteClientButton({
   clientId,
   companyName,
-  currentUserId,
 }: {
   clientId: string;
   companyName: string;
+  // kept in the type for call-site compatibility; auditing is server-side.
   currentUserId: string;
 }) {
   const router = useRouter();
@@ -38,24 +37,11 @@ export function DeleteClientButton({
   async function handleDelete() {
     setDeleting(true);
     setError(null);
-    const supabase = createClient();
 
-    // Audit first — after the delete there's no row to reference.
-    await logAudit(supabase, {
-      userId: currentUserId,
-      entityType: "client",
-      entityId: clientId,
-      action: "client_deleted",
-      details: { company_name: companyName },
-    });
-
-    const { error: deleteError } = await supabase
-      .from("clients")
-      .delete()
-      .eq("id", clientId);
-
-    if (deleteError) {
-      setError(deleteError.message);
+    const res = await fetch(`/api/clients/${clientId}`, { method: "DELETE" });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) {
+      setError(data.error ?? `Delete failed (HTTP ${res.status}).`);
       setDeleting(false);
       return;
     }

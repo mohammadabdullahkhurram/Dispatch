@@ -60,7 +60,7 @@ export function PortalChat({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newDmOpen, setNewDmOpen] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const messageListRef = useRef<HTMLDivElement>(null);
 
   const teamById = useMemo(
     () => Object.fromEntries(team.map((m) => [m.id, m])),
@@ -138,7 +138,9 @@ export function PortalChat({
   }, [activeId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scroll the message list itself, never the page.
+    const el = messageListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, activeId]);
 
   async function send(e?: React.FormEvent) {
@@ -218,9 +220,9 @@ export function PortalChat({
       : (activeGroup?.group_name ?? "Group chat");
 
   return (
-    <div className="flex h-[calc(100vh-57px)] flex-1 overflow-hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] flex-1 overflow-hidden">
       {/* Thread list */}
-      <aside className="hidden w-[280px] shrink-0 flex-col border-r border-border sm:flex">
+      <aside className="hidden min-h-0 w-[280px] shrink-0 flex-col border-r border-border sm:flex">
         <div className="flex items-center justify-between border-b border-border px-4 py-3.5">
           <div>
             <h1 className="text-base font-semibold tracking-tight">Chat</h1>
@@ -329,7 +331,10 @@ export function PortalChat({
           </p>
         </header>
 
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
+        <div
+          ref={messageListRef}
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6"
+        >
           {messages.length === 0 ? (
             <EmptyState
               icon={MessageSquare}
@@ -346,7 +351,6 @@ export function PortalChat({
               />
             ))
           )}
-          <div ref={bottomRef} />
         </div>
 
         <form

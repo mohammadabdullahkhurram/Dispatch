@@ -116,7 +116,6 @@ export async function POST(request: NextRequest) {
   // (search conversation → read messages → extract recording URL).
   if (!recordingUrl && contactId && locationId) {
     const result = await getCallRecordingFromConversation(contactId, locationId);
-    console.error("[recording-url] fetched:", result);
     if (result) recordingUrl = result;
   }
 

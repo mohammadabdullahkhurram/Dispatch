@@ -44,7 +44,7 @@ dispatch/
 │   ├── (team)/dashboard/        # Team workspace (theme toggle + notification bell)
 │   │   ├── page.tsx             # Stat cards w/ trends, timeline activity, my tasks
 │   │   ├── clients/             # Searchable list + 8-tab client profile (hero header)
-│   │   ├── tickets/             # Kanban (Open/In Progress/Escalated/Resolved)
+│   │   ├── tickets/             # Kanban (+ /[id] deep link opens a ticket's panel)
 │   │   ├── tasks/               # Kanban/list, filters, comments
 │   │   ├── chat/                # Workspace / Internal / Sessions — DMs, groups, presence
 │   │   ├── notifications/       # Realtime list, filters, mark-all-read
@@ -52,8 +52,10 @@ dispatch/
 │   └── api/
 │       ├── webhooks/ghl-sms/      # Inbound SMS (tag-gated) → session chat
 │       ├── webhooks/ghl-call/     # Completed IVR call → ticket + session + call_log
+│       ├── webhooks/ghl-call-retry/ # Backfill recording/transcript after a delay
 │       ├── chat/send-sms/         # Mirror team reply to SMS via GHL
 │       ├── clients/               # Create client + portal account + onboarding email
+│       ├── clients/[id]/          # Delete client (tears down chat past the no-delete guard)
 │       ├── clients/[id]/users/    # Add/remove client users (+ GHL tagging + onboarding email)
 │       ├── cron/notifications/    # Time-based checks (SLA breach, task due/overdue)
 │       ├── integrations/ghl-test/ # Live GHL credential check
@@ -62,7 +64,7 @@ dispatch/
 ├── components/                  # ui/ (shadcn + dispatch-logo), dashboard/, portal/, chat/, shared
 ├── lib/                         # supabase clients, ghl.ts (SMS + email), emails.ts,
 │                                #   sla.ts, phone.ts, audit.ts, types.ts, format.ts
-├── supabase/migrations/         # 001–014 (see Migrations)
+├── supabase/migrations/         # 001–016 (see Migrations)
 ├── scripts/                     # reset_test_data.sql + run-reset.mjs (wipe test
 │                                #   data, keep users/departments/templates)
 └── docs/                        # ghl-setup.md, ivr-setup.md
@@ -278,19 +280,22 @@ Creates a phone-sourced ticket (priority medium, SLA 24h) + a linked session wit
 | 011 | `notifications_and_sla` | Notification triggers (assigned/escalated/resolved/chat), time-based checks fn (SLA breach, task due/overdue) with entity dedupe, SLA before-insert backstop, client read policies for tasks + team names |
 | 012 | `workspace_membership` | Workspace threads titled with `company_name`, whole team as `participant_ids` (create + backfill), triggers to add new team members to all workspaces and remove departed ones |
 | 013 | `chat_groupchats` | `chat_type` enum + `group_name`/`group_owner_id`/`is_deletable` on threads, `users.last_seen` for presence, backfill of legacy categories, participant-scoped RLS via `can_access_thread` (dm/group/internal_*), and a trigger blocking deletion of undeletable (workspace) threads |
-| 014 | `fix_thread_chat_type` | **Required fix** — sets `chat_type` in the workspace/session thread triggers (013's default `'session'` was mistyping new clients' workspace threads), repairs mislabeled rows, de-dupes |
+| 014 | `fix_thread_chat_type` | Sets `chat_type` in the workspace/session thread triggers (013's default `'session'` was mistyping new clients' workspace threads), repairs mislabeled rows, de-dupes |
+| 015 | `realtime_chat_threads` | Adds `chat_threads` to the `supabase_realtime` publication so new sessions reach the team's chat live |
+| 016 | `ticket_call_sid` | `tickets.call_sid` — the Twilio call SID from the GHL webhook custom data, for reference |
 
-> Migrations 001–013 are **applied** in production (verified by probing for each one's columns/functions). **014 is pending** — apply it so new clients' workspace threads are typed correctly. See **[AUDIT.md](AUDIT.md)** for the full audit.
+> Migrations 001–013 are **applied** in production (verified by probing). **014–016 still need their DDL applied** in the Supabase SQL editor (the columns/functions/publication/trigger changes). The webhook/app also self-heal where possible (e.g. new clients' workspace `chat_type` is corrected in `/api/clients` even before 014).
 
 ## Known Issues
 
-- **Migration 014 must be applied** — without it, every new client's workspace chat is created with `chat_type='session'` (013's default), so it lands in the Sessions section and the portal can't find it (Bug #1 in AUDIT.md). The one existing affected row has been repaired; the trigger fix needs the 014 DDL.
-- **Onboarding & invite emails fail with 401** — the GHL token lacks the `conversations/message.write` scope. Code is correct; recreate the Private Integration Token with that scope and update `GHL_API_KEY` (Bug #2 in AUDIT.md).
-- **`ghl-call` webhook is unauthenticated/unsigned** — add a shared-secret before relying on phone tickets in production (S1 in AUDIT.md).
+- **Migrations 014–016 must be applied** — 014 fixes new-client workspace typing (the app also self-corrects it on create), 015 enables live new-session delivery, 016 adds `tickets.call_sid` (captured in metadata until then).
+- **Onboarding/invite emails & call-recording fetch need GHL token scopes** — email send needs `conversations/message.write`; reading call recordings needs `conversations/message.readonly` + `conversations.readonly`. Token scopes are fixed at creation — recreate the Private Integration Token with all required scopes (see `.env.example`) and update `GHL_API_KEY`.
+- **Call recordings aren't a field in GHL** — `TYPE_CALL` conversation messages carry no recording URL (only `meta.call` duration/status). The webhook fetches via the Conversations API, but to surface *playable* audio GHL's authenticated recording-bytes endpoint would need to be fetched and re-hosted (e.g. Supabase Storage) — not yet implemented; the UI shows "Recording not available for this call" meanwhile.
+- **Recording/transcript can lag the call** — GHL fires the webhook before processing finishes; `/api/webhooks/ghl-call-retry` backfills them, but the self-scheduled retry is best-effort on serverless (point a GHL "recording available" workflow or a cron at it for reliability).
+- **`ghl-call` webhook is unauthenticated/unsigned** — add a shared-secret before relying on phone tickets in production.
 - **No pagination on Clients / Tickets / Tasks lists** — they fetch all rows; fine at current scale, add `.range()` before data grows.
 - **One active SMS session per client** — inbound SMS lands in the client's most recent active session regardless of topic; a new topic only gets its own session after the previous one is resolved.
 - **`new_chat_message` notifies the whole team** — every non-client user is notified of client messages in workspace/session threads; fine at current team size, will need scoping (department/assignee) as the team grows.
-- **Temporary debug logging is live** — `[ghl-email][debug]` and `CLIENT CREATION STARTED/FINISHED` remain in `lib/ghl.ts` and `app/api/clients/route.ts` until the email path is confirmed working, then should be stripped.
 
 ## Roadmap
 
@@ -311,7 +316,7 @@ npm install
 
 cp .env.example .env.local   # fill in Supabase (+ GHL) values
 
-# Apply migrations 001–014, either:
+# Apply migrations 001–016, either:
 npx supabase login && npx supabase link --project-ref <your-ref>
 npx supabase db push
 # …or paste each file from supabase/migrations/ into the Studio SQL editor in order.

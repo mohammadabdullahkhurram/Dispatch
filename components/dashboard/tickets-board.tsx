@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Plus,
+  Sparkles,
   Ticket as TicketIcon,
   UserPlus,
 } from "lucide-react";
@@ -97,6 +100,8 @@ export function TicketsBoard({
   const [activity, setActivity] = useState<TicketActivity[]>([]);
   const [note, setNote] = useState("");
   const [resolutionNotes, setResolutionNotes] = useState("");
+  // Which ticket's transcript is expanded (auto-collapses on ticket switch).
+  const [transcriptOpenFor, setTranscriptOpenFor] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -580,31 +585,64 @@ export function TicketsBoard({
                   />
                 </div>
 
-                {selected.description && (
-                  <p className="whitespace-pre-wrap text-sm">{selected.description}</p>
-                )}
-
-                {selected.ai_summary && (
-                  <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
-                    <p className="text-xs font-medium uppercase tracking-wider text-primary">
-                      AI summary
-                    </p>
-                    <p className="mt-1 text-sm">{selected.ai_summary}</p>
-                  </div>
-                )}
-
-                {selected.voice_recording_url && (
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      Call recording
-                    </p>
-                    <audio controls src={selected.voice_recording_url} className="h-10 w-full" />
-                    {selected.transcription && (
-                      <p className="max-h-32 overflow-y-auto rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
-                        {selected.transcription}
-                      </p>
+                {selected.source === "phone" ? (
+                  /* Phone ticket: AI summary card, recording, and an
+                     expandable transcript (the raw description is the
+                     transcript, so it's not shown separately). */
+                  <div className="space-y-3">
+                    {selected.ai_summary && (
+                      <div className="rounded-lg border border-primary/30 bg-primary/10 p-3">
+                        <p className="flex items-center gap-1 text-xs font-medium uppercase tracking-wider text-primary">
+                          <Sparkles className="size-3" /> AI summary
+                        </p>
+                        <p className="mt-1 text-sm">{selected.ai_summary}</p>
+                      </div>
                     )}
+                    {selected.voice_recording_url && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                          Call recording
+                        </p>
+                        <audio
+                          controls
+                          src={selected.voice_recording_url}
+                          className="h-10 w-full"
+                        />
+                      </div>
+                    )}
+                    {selected.transcription &&
+                      (() => {
+                        const open = transcriptOpenFor === selected.id;
+                        return (
+                          <div>
+                            <button
+                              onClick={() =>
+                                setTranscriptOpenFor(open ? null : selected.id)
+                              }
+                              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                            >
+                              {open ? (
+                                <ChevronDown className="size-3.5" />
+                              ) : (
+                                <ChevronRight className="size-3.5" />
+                              )}
+                              {open ? "Hide transcript" : "Show transcript"}
+                            </button>
+                            {open && (
+                              <p className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-muted/40 p-2 text-sm">
+                                {selected.transcription}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                   </div>
+                ) : (
+                  selected.description && (
+                    <p className="whitespace-pre-wrap text-sm">
+                      {selected.description}
+                    </p>
+                  )
                 )}
 
                 <Separator />

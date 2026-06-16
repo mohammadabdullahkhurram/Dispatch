@@ -16,10 +16,6 @@ import { isTeamRole, type UserRole } from "@/lib/types";
  * email through GHL — the email path the dialog-only insert never had.
  */
 export async function POST(request: NextRequest) {
-  // First line in the handler — if this isn't in the logs, the request
-  // never reached this route (stale deploy, wrong path, or server action).
-  console.error("CLIENT CREATION STARTED", new Date().toISOString());
-
   const supabase = await createClient();
   const {
     data: { user },
@@ -61,11 +57,6 @@ export async function POST(request: NextRequest) {
   const contactName = body?.contact_name?.trim() || companyName;
 
   const admin = createAdminClient();
-  // TEMP DEBUG — env visibility for the email path (booleans only, no secrets)
-  console.log(
-    `[clients][debug] env check: GHL_API_KEY=${!!process.env.GHL_API_KEY} GHL_LOCATION_ID=${!!process.env.GHL_LOCATION_ID} GHL_FROM_EMAIL=${!!process.env.GHL_FROM_EMAIL}`
-  );
-  console.log(`[clients] creating client "${companyName}" (owner: ${email})`);
 
   const { data: client, error: insertError } = await admin
     .from("clients")
@@ -124,10 +115,8 @@ export async function POST(request: NextRequest) {
 
   if (existingUser) {
     userId = existingUser.id;
-    console.log(`[clients] reusing existing account ${userId} for ${email}`);
   } else {
     tempPassword = randomBytes(9).toString("base64url"); // 12 chars
-    console.log(`[clients][debug] Creating auth user for ${email}`);
     const { data: created, error: createError } =
       await admin.auth.admin.createUser({
         email,
@@ -139,7 +128,6 @@ export async function POST(request: NextRequest) {
       console.error("[clients] auth user create failed:", createError?.message);
       warning = `Client created, but the portal account failed: ${createError?.message}`;
     } else {
-      console.log(`[clients][debug] Auth user created: ${created.user.id}`);
       userId = created.user.id;
       await admin
         .from("users")
@@ -179,20 +167,12 @@ export async function POST(request: NextRequest) {
         companyName,
         tempPassword,
       });
-      console.log(
-        `[clients][debug] Calling sendEmail (to=${email}, tempPassword=${tempPassword ? "yes" : "no — existing account"})`
-      );
       const sent = await sendEmail(email, subject, html, { contactName });
-      console.log(`[clients][debug] sendEmail result: ${JSON.stringify(sent)}`);
       if (!sent.ok) {
-        console.error("[clients][debug] sendEmail error:", sent.error);
         // Surface the real reason, don't swallow it — it travels back in
-        // the API response (emailError) so it's visible in the Network
-        // tab and Vercel logs.
+        // the API response (emailError).
         emailError = sent.error ?? "Unknown sendEmail failure";
         warning = warning ?? `Client created, but the onboarding email failed: ${sent.error}`;
-      } else {
-        console.log(`[clients] onboarding email sent to ${email}`);
       }
     } catch (error) {
       const message =
@@ -215,8 +195,5 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  console.error(
-    `CLIENT CREATION FINISHED ${client.id} — emailError=${emailError ?? "none"}`
-  );
   return NextResponse.json({ client, warning, emailError });
 }
